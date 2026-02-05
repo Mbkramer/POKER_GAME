@@ -52,5 +52,3 @@ Simulation & Evaluation
 Hand evaluation utilities
 
 Probability‑ready architecture for future Monte Carlo or solver integration
-
-Hooks for logging and analytics

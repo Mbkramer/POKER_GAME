@@ -20,7 +20,9 @@ class Showdown():
         self.best_five_card_combo = []
         self.pot_share = 0
         self.find_winning_hand()
-        hand_rank = self.best_hand_value[0]
+        hand_rank = "HIGH"
+        if self.best_hand_value:
+            hand_rank = self.best_hand_value[0]
         self.best_hand_name = HAND_RANK_NAMES[hand_rank].upper()
         
     def hand_to_name(self, value):

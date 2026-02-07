@@ -122,7 +122,6 @@ class BettingRound:
 
             if (not player.folded) and (not player.all_in) and (player.playing):
                 if (player.bet < self.table.current_bet) or (not player.touched):
-                    print(f"PLAYER {player.id} active")
                     active.append(player.id)
 
             if player.folded or player.all_in or not player.playing:
@@ -131,7 +130,8 @@ class BettingRound:
         if len(active) < 1:
             self.active = False
 
-            if check == self.table.num_players:
+            # from equal to self.table.num_players
+            if check >= self.table.num_players-1:
                 self.table.end_hand = True
 
             return 

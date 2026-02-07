@@ -58,7 +58,7 @@ class HandController:
         self.table.pot += self.table.players[sb].place_bet(self.table.buy_in/2)
         self.table.pot += self.table.players[bb].place_bet(self.table.buy_in)
         self.table.players[bb].touched = True
-        self.table.players[sb].touched = True
+        self.table.players[sb].touched = False #From true
 
         self.table.current_bet = self.table.buy_in
 
@@ -187,7 +187,6 @@ class HandController:
                 self._showdown()
 
             case GamePhase.SHOWDOWN:
-                print(self.table.num_players_playing)
                 if self.table.num_players_playing > 1:
                     self.start_hand()
                 elif self.table.num_players_playing == 1:

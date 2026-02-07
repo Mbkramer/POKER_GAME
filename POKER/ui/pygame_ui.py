@@ -11,6 +11,7 @@ import pygame as pg
 import sys
 import os
 import math
+import time
 from typing import Optional
 
 # ---------- pygame scene variables ----------
@@ -181,17 +182,16 @@ class InputBox:
             else:
                 self.active = False
 
-            # Change the current color of the input box
-            self.color = COLOR_ACTIVE if self.active else COLOR_INACTIVE
-
         if event.type == pg.KEYDOWN:
             if self.active:
                 if event.key == pg.K_RETURN:
                     # When 'Enter' is pressed, store the text and reset the input box
                     try:
-                        self.active = False
-                        self.color = COLOR_INACTIVE
-                        self.stored_input = int(self.text)
+                        store = int(self.text)
+                        if store > 0:
+                            self.active = False
+                            self.color = COLOR_INACTIVE
+                            self.stored_input = store
                     except:
                         self.text = "0"
                     
@@ -200,8 +200,12 @@ class InputBox:
                     self.text = self.text[:-1] # Remove the last character
                 else:
                     self.text += event.unicode # Add the key's unicode character
+                    try: int(self.text)
+                    except: self.text = self.text[:-1]
 
                 self.txt_surface = self.input_font.render(f"${self.text}", True, BLACK)
+
+        self.color = COLOR_ACTIVE if self.active else COLOR_INACTIVE
 
     def update(self):
         # Resize the box if the text is too long
@@ -366,12 +370,8 @@ class Button:
                 if not self.active:
                     self.color = RED
 
-    def handle_new_round_button_event(self, event):
-
-        if event.type == pg.MOUSEBUTTONDOWN:
-            click_x, click_y = event.pos
-
-            if ((self.rect.x <= click_x <= self.rect.x+self.rect.width) and (self.rect.y <= click_y <=self.rect.y+self.rect.height)):
+        if event.type == pg.KEYDOWN:
+            if (event.key == pg.K_l):
                 self.active = True
                 if self.active:
                     self.color = DARK_GREEN
@@ -381,17 +381,39 @@ class Button:
                 if not self.active:
                     self.color = RED
 
+    def handle_new_round_button_event(self, event):
+
+        self.active = False
+
+        if event.type == pg.MOUSEBUTTONDOWN:
+            click_x, click_y = event.pos
+
+            if ((self.rect.x <= click_x <= self.rect.x+self.rect.width) and (self.rect.y <= click_y <=self.rect.y+self.rect.height)):
+                self.active = True
+                if self.active:
+                    self.color = DARK_GREEN
+
+        elif event.type == pg.KEYDOWN:
+
+            if event.key == pg.K_s:
+                self.active = True
+                if self.active:
+                    self.color = DARK_GREEN
+        else:
+            self.active = False
+            if not self.active:
+                self.color = RED
+
     def handle_hud_button(self, event):
 
         bet_decision = ""
 
+        #Check for click on hud button
         if event.type == pg.MOUSEBUTTONDOWN:
             click_x, click_y = event.pos
             
             if ((self.rect.x <= click_x <= self.rect.x+self.rect.width) and (self.rect.y <= click_y <=self.rect.y+self.rect.height)):
-    
                 self.active = True
-
                 if self.active:
                     self.color = DARK_GREEN
                     bet_decision = self.text
@@ -400,7 +422,6 @@ class Button:
                         if self.rect.width <= HUD_BUTTON_WIDTH:
                             self.background_rect.width = ((self.background_rect.width-6) * 3) +3
                             self.rect.width = self.rect.width * 3
-
             else:
                 self.active = False
                 if not self.active:
@@ -412,6 +433,62 @@ class Button:
                         self.rect.width = HUD_BUTTON_WIDTH
                         bet_decision = ""
 
+        #Check for key down
+        if event.type == pg.KEYDOWN:
+
+            raise_keys = [pg.K_BACKSPACE,pg.K_RETURN,pg.K_0,pg.K_1,pg.K_2,pg.K_3,pg.K_4,pg.K_5,pg.K_6,pg.K_7,pg.K_8,pg.K_9,pg.K_r]
+
+            if event.key == pg.K_f and self.text == "FOLD":
+
+                self.active = not self.active
+
+                if self.active:
+                    self.color = DARK_GREEN
+                    bet_decision = self.text
+                else:
+                    self.color = RED
+
+
+            elif event.key == pg.K_c and self.text == "CHECK":
+
+                self.active = not self.active
+                if self.active:
+                    self.color = DARK_GREEN
+                    bet_decision = self.text
+                else:
+                    self.color = RED
+
+            elif event.key == pg.K_r and self.text == "RAISE":
+
+                self.active = True
+                if self.active:
+                    self.color = DARK_GREEN
+                    bet_decision = self.text
+                    self.rendered_text = self.font.render("", True, BLACK)
+                    if self.rect.width <= HUD_BUTTON_WIDTH:
+                        self.background_rect.width = ((self.background_rect.width-6) * 3) +3
+                        self.rect.width = self.rect.width * 3
+                else:
+                    self.color = RED
+                    self.rendered_text = self.font.render(self.text, True, BLACK)
+                    self.background_rect.width = HUD_BUTTON_WIDTH + 6
+                    self.rect.width = HUD_BUTTON_WIDTH
+                    
+
+            elif event.key in raise_keys:
+                if self.text != "RAISE":
+                    self.active = False
+                    if not self.active:
+                        self.color = RED
+
+            else:
+                self.active = False
+                if not self.active:
+                    self.color = RED
+                    self.rendered_text = self.font.render(self.text, True, BLACK)
+                    self.background_rect.width = HUD_BUTTON_WIDTH + 6
+                    self.rect.width = HUD_BUTTON_WIDTH
+     
         return bet_decision
 
 def draw_card_images(CARDS_FOLDER_PATH):
@@ -480,11 +557,11 @@ def draw_chip_images(CHIPS_FOLDER_PATH):
 
     return chip_images
 
-def draw_pot(TABLE, chip_images):
+def draw_pot(pot, chip_images):
 
     pot_image = []
 
-    hold_pot = TABLE.pot
+    hold_pot = pot
 
     for chip_value in CHIP_VALUES:
 
@@ -767,6 +844,7 @@ class PygameUI:
                 self.hold_player_action=""
                 self.hold_player_action = c
             r = self.player_hud_buttons["RAISE"].handle_hud_button(event)
+            if self.player_hud_buttons["RAISE"].active: self.raise_input_box.active = True
             if r != "":
                 self.hold_player_action=""
                 self.hold_player_action = r
@@ -892,9 +970,6 @@ class PygameUI:
 
         screen.blit(self.scaled_background_image, (0,0))
 
-        self.pot_image = draw_pot(hc.table, self.chip_images)
-        self.player_images = draw_player_images(hc.table, self.card_images, self.chip_images)
-
         # Dealer station
         screen.blit(self.chip_images["DEALERTOP.png"], (DEALER_PLACEMENT_X-2*TOP_CHIP_WIDTH, DEALER_PLACEMENT_Y))
         deck_spread=1
@@ -902,7 +977,7 @@ class PygameUI:
             screen.blit(self.card_images["Back Red 1.png"], (DEALER_PLACEMENT_X, DEALER_PLACEMENT_Y-1*deck_spread))
             deck_spread+=1
 
-        self.pot_image = draw_pot(hc.table, self.chip_images)
+        self.pot_image = draw_pot(hc.table.pot, self.chip_images)
         self.player_images = draw_player_images(hc.table, self.card_images, self.chip_images)
 
         # Community cards
@@ -913,6 +988,8 @@ class PygameUI:
                 self.hold_player_images = self.player_images.copy()
 
         if hc.phase == GamePhase.SHOWDOWN:
+            self.draw_community_cards(hc.final_community_cards)
+            self.hold_river = self.com_deck.copy()
             if len(hc.winning_players) > 0:
                 self.hold_winner_images = []
                 for player_image in self.hold_player_images:
@@ -1145,33 +1222,56 @@ class PygameUI:
         
         winner = hc.winning_players[0]
 
-        input_window_header_text = self.header_font.render(f"GAME OVER! WINNER: PLAYER {winner.id}", True, WHITE)
-
         cash = f"${winner.cash:,.2f}"
         pot_share = f"${winner.largest_potshare:,.2f}"
 
-        best_hand_text = self.player_font.render(f"TOTAL NUMBER OF HANDS: {self.hand_counter}", True, BLACK)
-        wallet_text = self.player_font.render(f"FINAL WALLET SIZE: {cash} ", True, GOLD)
-        pot_share_text = self.player_font.render(f"BEST POT: {pot_share} ", True, GOLD)
-        best_five_card_text = self.player_font.render("BEST FIVE CARD HAND", True, BLACK) 
+        header_text = self.header_font.render(f"GAME OVER", True, WHITE)
+        header_winnner_text = self.header_font.render(f"WINNER: PLAYER {winner.id}", True, WHITE)
+        number_of_hands_text = self.header_font.render(f"TOTAL NUMBER OF HANDS: {self.hand_counter-1}", True, WHITE)
+        best_five_card_text = self.header_font.render("BEST FIVE CARD HAND", True, WHITE) 
         
-        screen.blit(input_window_header_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+40))
-        screen.blit(best_hand_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+75))
-        screen.blit(best_five_card_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+100))
-        screen.blit(wallet_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+150))
-        screen.blit(pot_share_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+175))
+        screen.blit(header_text, (GAME_OVER_PLACEMENT_X+20, GAME_OVER_PLACEMENT_Y+40))
+        screen.blit(header_winnner_text, (GAME_OVER_PLACEMENT_X+20, GAME_OVER_PLACEMENT_Y+70))
+        screen.blit(number_of_hands_text, (GAME_OVER_PLACEMENT_X+GAME_OVER_WIDTH/2, GAME_OVER_PLACEMENT_Y+40))
+        screen.blit(best_five_card_text, (GAME_OVER_PLACEMENT_X+GAME_OVER_WIDTH/2, GAME_OVER_PLACEMENT_Y+70))
 
         # Best hand image
         increment = 0
         for card in winner.best_hand:
             card_image = self.card_images[f"{card.id}.png"]
-            rect_x = (GAME_OVER_PLACEMENT_X+GAME_OVER_WIDTH/2) + increment * (CARD_WIDTH/3)
-            rect_y = (INPUT_WINDOW_PLACEMENT_Y+100)
+            rect_x = (GAME_OVER_PLACEMENT_X+GAME_OVER_WIDTH/2) + increment * (CARD_WIDTH/2)
+            rect_y = (GAME_OVER_PLACEMENT_Y+110)
             new_size = (CARD_WIDTH/2, CARD_HEIGHT/2)
             # Scale the image
             scaled_image = pg.transform.scale(card_image, new_size) #new_size
             screen.blit(scaled_image, (rect_x, rect_y))
             increment+=1
+
+        cash_image = draw_pot(winner.cash, self.chip_images)
+        pot_share_image = draw_pot(winner.largest_potshare, self.chip_images)
+        
+        # Draw Pot
+        pot_width = 1
+        
+        # Draw Pot
+        pot_width = 1
+        for stack in cash_image:
+            for i in range(stack[0][1]):
+                height_buffer = FLAT_CHIP_HEIGHT/2
+                screen.blit(stack[0][2], (GAME_OVER_PLACEMENT_X+20 + pot_width * FLAT_CHIP_WIDTH, GAME_OVER_PLACEMENT_Y+GAME_OVER_HEIGHT/2+5*FLAT_CHIP_HEIGHT - i* height_buffer))
+            pot_width+=1
+
+            pot_text = self.pot_font.render("WINNER CASH " + cash, True, GOLD) # Anti-alias=True
+            screen.blit(pot_text, (GAME_OVER_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+100 + 25))
+
+        for stack in pot_share_image:
+            for i in range(stack[0][1]):
+                height_buffer = FLAT_CHIP_HEIGHT/2
+                screen.blit(stack[0][2], (GAME_OVER_PLACEMENT_X + GAME_OVER_WIDTH/2 + pot_width * FLAT_CHIP_WIDTH, GAME_OVER_PLACEMENT_Y+GAME_OVER_HEIGHT/2+5*FLAT_CHIP_HEIGHT - i* height_buffer))
+            pot_width+=1
+
+            pot_share_text = self.pot_font.render("LARGEST POTSHARE " + pot_share, True, GOLD) # Anti-alias=True
+            screen.blit(pot_share_text, (GAME_OVER_PLACEMENT_X + GAME_OVER_WIDTH/2 + 2*FLAT_CHIP_WIDTH, INPUT_WINDOW_PLACEMENT_Y+100 + 25))
 
         # Draw axes
         pg.draw.line(screen, WHITE, (GRAPH_START_X, GRAPH_START_Y), (GRAPH_START_X, GRAPH_START_Y - GRAPH_HEIGHT), 2) # Y-axis

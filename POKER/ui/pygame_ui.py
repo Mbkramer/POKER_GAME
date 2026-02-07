@@ -11,7 +11,6 @@ import pygame as pg
 import sys
 import os
 import math
-import time
 from typing import Optional
 
 # ---------- pygame scene variables ----------

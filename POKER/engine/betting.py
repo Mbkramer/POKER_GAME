@@ -17,10 +17,11 @@ class BettingRound:
     """
 
     def __init__(self, table: TableState, starting_index: int):
+
         self.table = table
         self.current_index = starting_index
 
-        while self.table.players[self.current_index].folded or self.table.players[self.current_index].all_in:
+        while self.table.players[self.current_index].folded or self.table.players[self.current_index].all_in or not self.table.players[self.current_index].playing:
             self.current_index += 1
             if self.current_index == self.table.num_players:
                 self.current_index = 0
@@ -59,12 +60,21 @@ class BettingRound:
 
         self.table.players[action.player_index].touched = True
         self._check_complete()
-        self._advance_turn()
+        if self.active:
+            self._advance_turn()
 
+    # Need to add in side pots in the if to_call >= cash logic
     def _call(self, player: Player, to_call: int) -> None:
         if to_call <= 0:
             return
-        posted = player.place_bet(to_call)
+        
+        total = to_call
+
+        if to_call >= player.cash:
+            player.all_in = True
+            total = player.cash
+
+        posted = player.place_bet(total)
         self.table.pot += posted
 
     def _raise(self, player: Player, to_call: int, raise_amount: int) -> None:
@@ -74,9 +84,16 @@ class BettingRound:
             raise ValueError("Raise amount must be double current bet")
 
         total = to_call + raise_amount
+
+        if total >= player.cash:
+            player.all_in = True
+            total = player.cash
+
         posted = player.place_bet(total)
 
-        self.table.current_bet = player.bet
+        if posted >= self.table.current_bet:
+            self.table.current_bet = player.bet
+
         self.table.pot += posted
 
     def _advance_turn(self) -> None:
@@ -86,10 +103,10 @@ class BettingRound:
         """
         count = len(self.table.players)
 
-        for _ in range(count):
+        for index in range(count):
             self.current_index = (self.current_index + 1) % count
             p = self.table.players[self.current_index]
-            if not p.folded and not p.all_in:
+            if not p.folded and not p.all_in and p.playing:
                 return
 
     def _check_complete(self) -> None:
@@ -99,15 +116,25 @@ class BettingRound:
         - All active players have matched the current bet
         """
         active = []
+        check = 0
 
         for player in self.table.players:
-            if (not player.folded) and (not player.all_in):
+
+            if (not player.folded) and (not player.all_in) and (player.playing):
                 if (player.bet < self.table.current_bet) or (not player.touched):
+                    print(f"PLAYER {player.id} active")
                     active.append(player.id)
+
+            if player.folded or player.all_in or not player.playing:
+                check+=1
 
         if len(active) < 1:
             self.active = False
-            return
+
+            if check == self.table.num_players:
+                self.table.end_hand = True
+
+            return 
 
         self.active = True
 

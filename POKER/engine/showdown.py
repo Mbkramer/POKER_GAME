@@ -44,6 +44,7 @@ class Showdown():
             if self.best_hand_value is None or hand_value > self.best_hand_value:
                 self.best_hand_value = hand_value
                 self.best_five_card_combo = best_five_card_combo
+                self.best_five_card_combo = sorted(self.best_five_card_combo)
                 self.winning_players = [player]
             elif hand_value == self.best_hand_value:
                 self.winning_players.append(player)

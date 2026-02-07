@@ -8,6 +8,7 @@ class TableState:
     def __init__(self, num_players, buy_in, wallet):
 
         self.num_players = num_players
+        self.num_players_playing = num_players
         self.buy_in = buy_in
         self.wallet = wallet
 
@@ -26,6 +27,8 @@ class TableState:
         self.dealer_index = 0
         self.small_blind = 0
         self.big_blind = 1
+
+        self.end_hand = False
 
     def active_players(self) -> List[Player]:
         return [p for p in self.players if not p.folded]

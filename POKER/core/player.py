@@ -14,8 +14,15 @@ class Player:
         self.buy_in = buy_in
         self.folded = False
         self.all_in = False
+        self.playing = True
         self.touched = False
-        self.hand_value = 0
+        self.hand_value = None
+
+        #end game stats
+        self.best_hand_value = 0
+        self.best_hand = []
+        self.largest_potshare = 0
+        self.cash_by_round = [cash]
 
     def deal(self, Card):
         self.hand.append(Card)
@@ -49,12 +56,17 @@ class Player:
         self.bet = 0
         self.all_in = False
         self.folded = False
+
+    def finished(self):
+        self.playing = False
+        self.bet=0
+        self.cash=0
     
     def __repr__(self) -> str:
         return (
-            f"Player(name={self.name}, "
-            f"wallet={self.wallet}, "
-            f"bet={self.current_bet}, "
+            f"Player(name={self.id}, "
+            f"wallet={self.cash}, "
+            f"bet={self.bet}, "
             f"folded={self.folded}, "
             f"all_in={self.all_in})"
         )

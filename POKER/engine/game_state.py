@@ -8,3 +8,4 @@ class GamePhase(Enum):
     TURN = auto()
     RIVER = auto()
     SHOWDOWN = auto()
+    GAMEOVER = auto()

@@ -2,7 +2,7 @@ from engine.game_state import GamePhase
 from core.table_state import TableState
 from core.player import Player
 from core.deck import Deck
-from core.card import Card
+from core.card import HAND_RANK_NAMES, HAND_RANKS
 from core.player_action import ActionType, PlayerAction
 from engine.hand_controller import HandController
 from core.hand_evaluator import HandEvaluator
@@ -31,10 +31,11 @@ TRANSPARENT_BLUE = (0, 0, 255, 128)
 GREEN = (0, 255, 0)
 DARK_GREEN = (0, 100, 0)
 RED = (255, 0, 0)
+DARK_RED = (139, 0, 0)
 BLACK = (0, 0, 0)
 
 #Table
-BACKGROUND_IMAGE_PATH = "GAME_IMAGES/TABLE/Poker_Table.png"
+BACKGROUND_IMAGE_PATH = "GAME_IMAGES/TABLE/Poker_Table_Dark.png"
 MAX_PLAYERS = 6
 
 #Text
@@ -65,6 +66,18 @@ INPUT_WINDOW_HEIGHT = 300
 INPUT_WINDOW_WIDTH = 350
 INPUT_WINDOW_PLACEMENT_X = WINDOW_CENTER_X - INPUT_WINDOW_WIDTH/2
 INPUT_WINDOW_PLACEMENT_Y = WINDOW_CENTER_Y - INPUT_WINDOW_HEIGHT/2
+
+#Game Over Window
+GAME_OVER_HEIGHT = 400
+GAME_OVER_WIDTH = 800
+GAME_OVER_PLACEMENT_X = 100
+GAME_OVER_PLACEMENT_Y = 100
+
+# Graph parameters
+GRAPH_START_X = GAME_OVER_PLACEMENT_X + GAME_OVER_WIDTH/8
+GRAPH_START_Y = GAME_OVER_PLACEMENT_Y + GAME_OVER_HEIGHT - 25
+GRAPH_HEIGHT = 75
+X_SPACING = 10
 
 #Hud Window
 HUD_WINDOW_PLACEMENT_X = 200
@@ -492,7 +505,7 @@ def draw_pot(TABLE, chip_images):
 
     return pot_image
 
-def draw_player_images(Table, card_images, chip_images):
+def draw_player_images(table, card_images, chip_images):
 
     player_images = []
 
@@ -502,7 +515,7 @@ def draw_player_images(Table, card_images, chip_images):
     range = range * 2 
     
     #break range in even slices for players
-    player_location_angle = range / (Table.num_players-1)
+    player_location_angle = range / (table.num_players-1)
     start = start - math.pi / 2
 
     a = ELLIPSE_PLACEMENT_WIDTH / 2 # Semi-major axis (half the longest diameter)
@@ -510,14 +523,14 @@ def draw_player_images(Table, card_images, chip_images):
 
     player_spot = 0
 
-    for player in Table.players:
+    for player in table.players:
 
         player_image = {}
         
         player_image["ID"] = player.id
         player_image["CASH"] = player.cash
         player_image["BET"] = player.bet
-        player_image["PLAYING"] = not player.folded
+        player_image["PLAYING"] = player.playing
         player_image["HAND"] = []
 
         if len(player.hand) == 2:
@@ -533,12 +546,13 @@ def draw_player_images(Table, card_images, chip_images):
 
         player_image["ORDER"] = None
 
-        if Table.small_blind == player.id:
+        if table.small_blind == player.id:
             player_image["ORDER"] = chip_images["SMALLBLINDTOP.png"]
-        elif Table.big_blind == player.id:
+        elif table.big_blind == player.id:
             player_image["ORDER"] = chip_images["BIGBLINDTOP.png"]
 
         player_image["FOLDED"] = player.folded
+        player_image["ALL_IN"] = player.all_in
 
         player_placement_x = int(ELLIPSE_CENTER_X + (a * math.cos(start + player_location_angle*player_spot)))
         player_placement_y = int(ELLIPSE_CENTER_Y + (b * math.sin(start + player_location_angle*player_spot)))
@@ -689,6 +703,14 @@ class PygameUI:
         for i in range(5):
             self.com_deck.append(self.card_images["Back Red 1.png"])
 
+    def draw_community_cards(self, cards):
+
+        i = 0
+        for card in cards:
+            filename = card.id + ".png"
+            self.com_deck[i] = (self.card_images[filename])
+            i+=1
+
     # =========================
     # Event handling
     # =========================
@@ -819,6 +841,7 @@ class PygameUI:
     # Rendering
     # =========================
 
+    #Draw setup screens
     def _draw_setup(self, screen):
 
         # Input Window
@@ -845,9 +868,12 @@ class PygameUI:
         if (self.hold_num_players>0) and (self.hold_buy_in>0) and (self.hold_wallet>0):
             self.start_button.draw_start_button(screen)
 
+
+    # Draw in game screens
     def _draw_phase(self, screen, hc):
 
-        #TEST BLOCK
+        if hc.phase == GamePhase.GAMEOVER:
+            self.game_running=False
 
         phase_text = ""
         transparent_surface = pg.Surface((CARD_WIDTH-2, CARD_HEIGHT-2), pg.SRCALPHA)
@@ -881,14 +907,10 @@ class PygameUI:
 
         # Community cards
         if len(hc.table.community_cards)>0:
-            i = 0
-            for card in hc.table.community_cards:
-                filename = card.id + ".png"
-                filename = filename
-                self.com_deck[i] = self.card_images[filename]
-                i += 1
-            self.hold_river = self.com_deck.copy()
-            self.hold_player_images = self.player_images.copy()
+            self.draw_community_cards(hc.table.community_cards)
+            if len(self.com_deck) == 5:
+                self.hold_river = self.com_deck
+                self.hold_player_images = self.player_images.copy()
 
         if hc.phase == GamePhase.SHOWDOWN:
             if len(hc.winning_players) > 0:
@@ -917,31 +939,34 @@ class PygameUI:
             screen.blit(self.com_deck[3], (COMMUNITY_CARDS_PLACEMENT_X+3*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
             screen.blit(self.com_deck[4], (COMMUNITY_CARDS_PLACEMENT_X+4*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
         elif hc.phase == GamePhase.SHOWDOWN:
-            screen.blit(self.hold_river[0], (COMMUNITY_CARDS_PLACEMENT_X, COMMUNITY_CARDS_PLACEMENT_Y))
-            for card in hc.best_five_card_combo:
-                card_image = self.card_images[f"{card.id}.png"]
-                if self.hold_river[0] == card_image:
-                    screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1), COMMUNITY_CARDS_PLACEMENT_Y+1))
-            screen.blit(self.hold_river[1], (COMMUNITY_CARDS_PLACEMENT_X+CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
-            for card in hc.best_five_card_combo:
-                card_image = self.card_images[f"{card.id}.png"]
-                if self.hold_river[1] == card_image:
-                    screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1)+CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y+1))
-            screen.blit(self.hold_river[2], (COMMUNITY_CARDS_PLACEMENT_X+2*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
-            for card in hc.best_five_card_combo:
-                card_image = self.card_images[f"{card.id}.png"]
-                if self.hold_river[2] == card_image:
-                    screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1)+2*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y+1))
-            screen.blit(self.hold_river[3], (COMMUNITY_CARDS_PLACEMENT_X+3*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
-            for card in hc.best_five_card_combo:
-                card_image = self.card_images[f"{card.id}.png"]
-                if self.hold_river[3] == card_image:
-                    screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1)+3*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y+1))
-            screen.blit(self.hold_river[4], (COMMUNITY_CARDS_PLACEMENT_X+4*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
-            for card in hc.best_five_card_combo:
-                card_image = self.card_images[f"{card.id}.png"]
-                if self.hold_river[4] == card_image:
-                    screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1)+4*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y+1))
+            try:
+                screen.blit(self.hold_river[0], (COMMUNITY_CARDS_PLACEMENT_X, COMMUNITY_CARDS_PLACEMENT_Y))
+                for card in hc.best_five_card_combo:
+                    card_image = self.card_images[f"{card.id}.png"]
+                    if self.hold_river[0] == card_image:
+                        screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1), COMMUNITY_CARDS_PLACEMENT_Y+1))
+                screen.blit(self.hold_river[1], (COMMUNITY_CARDS_PLACEMENT_X+CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
+                for card in hc.best_five_card_combo:
+                    card_image = self.card_images[f"{card.id}.png"]
+                    if self.hold_river[1] == card_image:
+                        screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1)+CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y+1))
+                screen.blit(self.hold_river[2], (COMMUNITY_CARDS_PLACEMENT_X+2*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
+                for card in hc.best_five_card_combo:
+                    card_image = self.card_images[f"{card.id}.png"]
+                    if self.hold_river[2] == card_image:
+                        screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1)+2*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y+1))
+                screen.blit(self.hold_river[3], (COMMUNITY_CARDS_PLACEMENT_X+3*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
+                for card in hc.best_five_card_combo:
+                    card_image = self.card_images[f"{card.id}.png"]
+                    if self.hold_river[3] == card_image:
+                        screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1)+3*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y+1))
+                screen.blit(self.hold_river[4], (COMMUNITY_CARDS_PLACEMENT_X+4*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
+                for card in hc.best_five_card_combo:
+                    card_image = self.card_images[f"{card.id}.png"]
+                    if self.hold_river[4] == card_image:
+                        screen.blit(transparent_surface, ((COMMUNITY_CARDS_PLACEMENT_X+1)+4*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y+1))
+            except IndexError:
+                print(f"IndexError length hold river {len(self.hold_river)}")
 
         # Draw Pot
         pot_width = 1
@@ -959,14 +984,22 @@ class PygameUI:
         for player_image in self.player_images:
             
             pg.draw.rect(screen, DARK_GRAY, (player_image["PLAYER_PLACEMENT_X"]-5, player_image["PLAYER_PLACEMENT_Y"]-5, PLAYER_WIDTH+10, PLAYER_HEIGHT+10), border_radius = PLAYER_RADIUS) # Player background
-            pg.draw.rect(screen, GRAY, (player_image["PLAYER_PLACEMENT_X"], player_image["PLAYER_PLACEMENT_Y"], PLAYER_WIDTH, PLAYER_HEIGHT), border_radius = PLAYER_RADIUS) # Player 
+
+            if player_image["PLAYING"]:
+                pg.draw.rect(screen, GRAY, (player_image["PLAYER_PLACEMENT_X"], player_image["PLAYER_PLACEMENT_Y"], PLAYER_WIDTH, PLAYER_HEIGHT), border_radius = PLAYER_RADIUS) # Player 
+            elif not player_image["PLAYING"]:
+                pg.draw.rect(screen, DARK_RED, (player_image["PLAYER_PLACEMENT_X"], player_image["PLAYER_PLACEMENT_Y"], PLAYER_WIDTH, PLAYER_HEIGHT), border_radius = PLAYER_RADIUS)
 
             wallet_text = self.money_font.render("WALLET: $" + str(player_image["CASH"]), True, GOLD)
 
             bet_text = ""
 
-            if player_image["FOLDED"] == True:
+            if player_image["PLAYING"] == False:
+                bet_text = self.money_font.render("out", True, BLACK)
+            elif player_image["FOLDED"] == True:
                 bet_text = self.money_font.render("fold", True, BLACK)
+            elif player_image["ALL_IN"] == True:
+                bet_text = self.money_font.render("ALL IN", True, GOLD)
             elif player_image["BET"] != hc.table.current_bet:
                 bet_text = self.money_font.render("BET: $" + str(player_image["BET"]), True, RED)
             elif player_image["BET"] == hc.table.current_bet:
@@ -980,17 +1013,6 @@ class PygameUI:
 
             if player_image["ORDER"]:
                 screen.blit(player_image["ORDER"], (player_image["PLAYER_PLACEMENT_X"]+90, player_image["PLAYER_PLACEMENT_Y"]+15))
-        
-            buttons_to_center_x = 0
-            buttons_to_center_y = -HUD_BUTTON_HEIGHT/2
-
-            if player_image["PLAYER_PLACEMENT_X"] < 500:
-                buttons_to_center_y -= PLAYER_HEIGHT
-            elif player_image["PLAYER_PLACEMENT_X"] > 500:
-                if player_image["PLAYER_PLACEMENT_Y"] < 450:
-                    buttons_to_center_x -= PLAYER_WIDTH
-                elif player_image["PLAYER_PLACEMENT_Y"] > 450:
-                    buttons_to_center_y -= PLAYER_HEIGHT
 
             # DRAW HAND 
             cards_to_center_x = 0
@@ -1008,25 +1030,39 @@ class PygameUI:
                     cards_to_center_x += CARD_WIDTH*.75
 
             if hc.phase != GamePhase.SHOWDOWN:
-                if player_image["ID"] == hc.betting_round.current_index:
-                    screen.blit(player_image["HAND"][1][1], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-                    screen.blit(player_image["HAND"][0][1], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-                else:
-                    screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-                    screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+
+                if player_image["PLAYING"]:
+                    if player_image["ID"] == hc.betting_round.current_index:
+                        screen.blit(player_image["HAND"][1][1], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+                        screen.blit(player_image["HAND"][0][1], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+                    else:
+                        screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+                        screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+
             elif hc.phase == GamePhase.SHOWDOWN:
 
                 for winner_image in self.hold_winner_images:
 
-                    if player_image["ID"] == winner_image["ID"]:
+                    if (player_image["ID"] == winner_image["ID"]):
 
-                        screen.blit(winner_image["HAND"][1][1], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-                        screen.blit(transparent_surface, (player_image["PLAYER_PLACEMENT_X"]+1+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+1+cards_to_center_y))
-                        screen.blit(winner_image["HAND"][0][1], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-                        screen.blit(transparent_surface, (player_image["PLAYER_PLACEMENT_X"]+1+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+1+cards_to_center_y))
+                        screen.blit(winner_image["HAND"][1][1], (winner_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, winner_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+                        
+                        for card in hc.best_five_card_combo:
+                            card_image = self.card_images[f"{card.id}.png"]
+                            if card_image == winner_image["HAND"][1][1]:
+                                screen.blit(transparent_surface, (winner_image["PLAYER_PLACEMENT_X"]+1+cards_to_center_x, winner_image["PLAYER_PLACEMENT_Y"]+1+cards_to_center_y))
+
+                        screen.blit(winner_image["HAND"][0][1], (winner_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, winner_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+
+                        for card in hc.best_five_card_combo:
+                            card_image = self.card_images[f"{card.id}.png"]
+                            if card_image == winner_image["HAND"][0][1]:
+                                screen.blit(transparent_surface, (winner_image["PLAYER_PLACEMENT_X"]+1+40+cards_to_center_x, winner_image["PLAYER_PLACEMENT_Y"]+1+cards_to_center_y))
+
                     else:
-                        screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-                        screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+                        if player_image["PLAYING"]:
+                            screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+                            screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
 
         # Player HUD windown 
         # Check player is current player or SHOWDOWN
@@ -1070,8 +1106,8 @@ class PygameUI:
             for card in hc.best_five_card_combo:
                 card_image = self.card_images[f"{card.id}.png"]
 
-                rect_x = (HUD_WINDOW_PLACEMENT_X+HUD_WINDOW_WIDTH/2) + increment * (CARD_WIDTH/4)
-                rect_y = (HUD_WINDOW_PLACEMENT_Y+HUD_WINDOW_HEIGHT-HUD_WINDOW_HEIGHT/2) + increment * (CARD_HEIGHT/4)
+                rect_x = (HUD_WINDOW_PLACEMENT_X+HUD_WINDOW_WIDTH/2) + increment * (CARD_WIDTH/3)
+                rect_y = (HUD_WINDOW_PLACEMENT_Y+HUD_WINDOW_HEIGHT-HUD_WINDOW_HEIGHT/2 + CARD_HEIGHT/4)
 
                 new_size = (CARD_WIDTH/2, CARD_HEIGHT/2)
 
@@ -1083,14 +1119,14 @@ class PygameUI:
 
             winning_players = "WINNERS: "
             for winner in hc.winning_players:
-                winning_players += f"PLAYER {winner.id}"
+                winning_players = winning_players + f"PLAYER {winner.id} "
 
             hud_window_header_text = self.hud_header_font.render(f"HAND {self.hand_counter}: {phase_text}", True, WHITE)
-            winning_players_text = self.player_font.render(winning_players, True, GREEN)
+            winning_players_text = self.player_font.render(winning_players, True, BLACK)
             pot_share_text = self.player_font.render(f"POT SHARE: ${hc.pot_share}", True, BLACK)
             best_hand_name_text = self.player_font.render(f"HAND: {hc.best_hand_name}", True, BLACK)
             screen.blit(hud_window_header_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+110))
-            screen.blit(winning_players_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+190))
+            screen.blit(winning_players_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y + HUD_WINDOW_HEIGHT/2))
             screen.blit(pot_share_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+225))
             screen.blit(best_hand_name_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+260))
 
@@ -1099,6 +1135,62 @@ class PygameUI:
         #Show Screen
         pg.display.flip()
 
+    def _draw_game_over(self, screen, hc):
+
+        screen.fill(BLACK)
+
+        # End Game Window
+        pg.draw.rect(screen, DARK_GRAY, (GAME_OVER_PLACEMENT_X-5, GAME_OVER_PLACEMENT_Y-5, GAME_OVER_WIDTH+10, GAME_OVER_HEIGHT+10), border_radius = PLAYER_RADIUS) 
+        pg.draw.rect(screen, GRAY, (GAME_OVER_PLACEMENT_X, GAME_OVER_PLACEMENT_Y, GAME_OVER_WIDTH, GAME_OVER_HEIGHT), border_radius = PLAYER_RADIUS)
+        
+        winner = hc.winning_players[0]
+
+        input_window_header_text = self.header_font.render(f"GAME OVER! WINNER: PLAYER {winner.id}", True, WHITE)
+
+        cash = f"${winner.cash:,.2f}"
+        pot_share = f"${winner.largest_potshare:,.2f}"
+
+        best_hand_text = self.player_font.render(f"TOTAL NUMBER OF HANDS: {self.hand_counter}", True, BLACK)
+        wallet_text = self.player_font.render(f"FINAL WALLET SIZE: {cash} ", True, GOLD)
+        pot_share_text = self.player_font.render(f"BEST POT: {pot_share} ", True, GOLD)
+        best_five_card_text = self.player_font.render("BEST FIVE CARD HAND", True, BLACK) 
+        
+        screen.blit(input_window_header_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+40))
+        screen.blit(best_hand_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+75))
+        screen.blit(best_five_card_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+100))
+        screen.blit(wallet_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+150))
+        screen.blit(pot_share_text, (INPUT_WINDOW_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+175))
+
+        # Best hand image
+        increment = 0
+        for card in winner.best_hand:
+            card_image = self.card_images[f"{card.id}.png"]
+            rect_x = (GAME_OVER_PLACEMENT_X+GAME_OVER_WIDTH/2) + increment * (CARD_WIDTH/3)
+            rect_y = (INPUT_WINDOW_PLACEMENT_Y+100)
+            new_size = (CARD_WIDTH/2, CARD_HEIGHT/2)
+            # Scale the image
+            scaled_image = pg.transform.scale(card_image, new_size) #new_size
+            screen.blit(scaled_image, (rect_x, rect_y))
+            increment+=1
+
+        # Draw axes
+        pg.draw.line(screen, WHITE, (GRAPH_START_X, GRAPH_START_Y), (GRAPH_START_X, GRAPH_START_Y - GRAPH_HEIGHT), 2) # Y-axis
+        pg.draw.line(screen, WHITE, (GRAPH_START_X, GRAPH_START_Y), (GRAPH_START_X + len(winner.cash_by_round) * X_SPACING, GRAPH_START_Y), 2) # X-axis
+
+        # Draw the line graph
+        if len(winner.cash_by_round) > 1:
+            points = [self.get_screen_coord(i, dp, winner.cash_by_round) for i, dp in enumerate(winner.cash_by_round)]
+            # Use the pygame.draw.lines function to connect multiple points
+            pg.draw.lines(screen, GOLD, False, points, 3)
+
+        pg.display.flip()
+
+    def get_screen_coord(self, x_index, y_value, cash_by_round):
+        # Invert the y-axis (Pygame y-origin is top-left) and scale
+        screen_x = GRAPH_START_X + x_index * X_SPACING
+        screen_y = GRAPH_START_Y - (y_value * (GRAPH_HEIGHT / max(cash_by_round)))
+        return int(screen_x), int(screen_y)
+    
     # ==========================
     # Toggle between setup and gameplay visuals
     # ==========================
@@ -1114,8 +1206,10 @@ class PygameUI:
 
         if phase == GamePhase.SETUP: # and not self.running
             self._draw_setup(screen)
-        else: # elif self.engine is not None
+        elif phase != GamePhase.GAMEOVER: # elif self.engine is not None
             self._draw_phase(screen, hc)
+        elif phase == GamePhase.GAMEOVER:
+            self._draw_game_over(screen, hc)
 
         pg.display.flip()
 
@@ -1138,6 +1232,11 @@ class PygameUI:
         # renders game window input
         while self.game_running and self.running:
             
+            self.clock.tick(60)
+            self._handle_game_events(screen, hc)
+            self._render(screen, hc)
+
+        while self.running:
             self.clock.tick(60)
             self._handle_game_events(screen, hc)
             self._render(screen, hc)

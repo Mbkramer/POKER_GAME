@@ -1,3 +1,4 @@
+from core.card import HAND_RANKS, SUIT_VALUE, CARD_VALUE
 from core.deck import Deck
 from core.table_state import TableState
 from engine.betting import BettingRound
@@ -18,11 +19,11 @@ class HandController:
         self.betting_round: BettingRound | None = None
 
         self.winning_players = []
+        self.final_community_cards = []
         self.best_hand_name = ""
         self.best_five_card_combo = []
         self.pot_share = 0
         
-
     # =========================
     # Hand setup
     # =========================
@@ -46,6 +47,11 @@ class HandController:
         sb = (self.table.dealer_index) % len(self.table.players)
         bb = (self.table.dealer_index + 1)  % len(self.table.players)
 
+        while not self.table.players[bb].playing:
+            bb += 1
+            if bb >= self.table.num_players:
+                bb = 0
+
         self.table.small_blind = sb
         self.table.big_blind = bb
 
@@ -60,35 +66,29 @@ class HandController:
 
         for i in range(2):
             for p in self.table.players:
-                if len(p.hand) < 2:
+                if len(p.hand) < 2 and p.playing:
                     p.deal(self.deck.deal())
 
     def reset_round(self):
 
-        self.table.pot = 0
-        self.table.current_bet = 0
-        
-        self.table.dealer_index += 1
-        if self.table.dealer_index >= self.table.num_players:
-            self.table.dealer_index = 0
-
         #return cards to deck and recent indicators
         for player in self.table.players:
+            if player.playing:
 
-            player.folded = False
-            player.all_in = False
-            player.touched = False
+                player.folded = False
+                player.all_in = False
+                player.touched = False
+                player.cash_by_round.append(player.cash)
 
-            player.hand_value = 0
-            player.bet = 0
+                if player.cash <= 0:
+                    player.playing = False
+                    self.table.num_players_playing-=1
 
-            self.deck.cards.append(player.hand.pop())
-            self.deck.cards.append(player.hand.pop())
+                player.hand_value = 0
+                player.bet = 0
 
-            #increment dealer order
-            player.order += 1
-            if player.order == self.table.num_players:
-                player.order = 0
+                while len(player.hand) > 0:
+                    self.deck.cards.append(player.hand.pop())
 
         while len(self.table.community_cards) > 0:
             self.deck.cards.append(self.table.community_cards.pop())
@@ -98,21 +98,45 @@ class HandController:
 
         if len(self.deck.cards) != 52:
             raise ValueError(f"Deck should have 52 cards. DECK LENGTH: {len(self.deck.cards)}")
+        
+        self.table.pot = 0
+        self.table.current_bet = 0
+        self.table.end_hand = False
+        
+        self.table.dealer_index += 1
+        if self.table.dealer_index >= self.table.num_players:
+            self.table.dealer_index = 0
+
+        while not self.table.players[self.table.dealer_index].playing:
+            self.table.dealer_index += 1
+            if self.table.dealer_index >= self.table.num_players:
+                self.table.dealer_index = 0
 
     # =========================
     # Betting flow
     # =========================
 
+    # establish starting index and initialize new betting round
     def _start_betting_round(self) -> None:
         start_index = (self.table.dealer_index + 2) % len(self.table.players)
         self.betting_round = BettingRound(self.table, start_index)
 
+    # reset table betting round data
     def _end_betting_round(self) -> None:
         self.table.current_bet = 0
         for player in self.table.players:
             player.touched = False
-        
 
+    # deal a card to the table community deck
+    def _deal_community(self, count: int) -> None:
+        for _ in range(count):
+            self.table.community_cards.append(self.deck.deal())
+
+    # deal a card to the table burn deck
+    def _deal_burn(self) -> None:
+        self.table.burn_deck.append(self.deck.deal())
+        
+    # process ui game action    
     def apply_action(self, action) -> None:
         """
         Entry point for UI / AI.
@@ -121,6 +145,10 @@ class HandController:
             raise RuntimeError("No active betting round")
 
         self.betting_round.apply(action)
+
+        if self.table.end_hand:
+            self._end_betting_round()
+            self._close_hand()
 
         if not self.betting_round.active:
             self._end_betting_round()
@@ -157,18 +185,41 @@ class HandController:
                 
                 self.phase = GamePhase.SHOWDOWN
                 self._showdown()
-                
+
             case GamePhase.SHOWDOWN:
-                self.start_hand()
+                print(self.table.num_players_playing)
+                if self.table.num_players_playing > 1:
+                    self.start_hand()
+                elif self.table.num_players_playing == 1:
+                    self.phase = GamePhase.GAMEOVER
+                    self.game_over()
                 
         self._start_betting_round()
 
-    def _deal_community(self, count: int) -> None:
-        for _ in range(count):
-            self.table.community_cards.append(self.deck.deal())
+    #flash hand to showdown
+    def _close_hand(self):
 
-    def _deal_burn(self) -> None:
-        self.table.burn_deck.append(self.deck.deal())
+        if self.phase == GamePhase.PREFLOP:
+            self._deal_burn()
+            self._deal_community(3)
+            self._deal_burn()
+            self._deal_community(1)
+            self._deal_burn()
+            self._deal_community(1)
+        elif self.phase == GamePhase.FLOP:
+            self._deal_burn()
+            self._deal_community(1)
+            self._deal_burn()
+            self._deal_community(1)
+        elif self.phase == GamePhase.TURN:
+            self._deal_burn()
+            self._deal_community(1)
+
+        self.phase = GamePhase.RIVER
+
+    # Last player standing has been identified
+    def game_over(self):
+        return
 
     # =========================
     # Showdown
@@ -177,7 +228,7 @@ class HandController:
     def _showdown(self):
 
         showdown = Showdown(self.table, self.evaluator)
-
+        self.final_community_cards = sorted(self.table.community_cards)
         self.winning_players = showdown.winning_players
         self.best_five_card_combo = showdown.best_five_card_combo
         self.pot_share = showdown.pot_share
@@ -186,6 +237,14 @@ class HandController:
         for player in self.table.players:
             for winner in self.winning_players:
                 if winner.id == player.id:
+
+                    if showdown.best_hand_value[0] > player.best_hand_value:
+                        player.best_hand_value = showdown.best_hand_value[0]
+                        player.best_hand = self.best_five_card_combo
+
+                    if showdown.pot_share > player.largest_potshare:
+                        player.largest_potshare = showdown.pot_share
+
                     player.rake(showdown.pot_share)
         
         self.reset_round()

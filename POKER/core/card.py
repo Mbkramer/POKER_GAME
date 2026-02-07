@@ -9,6 +9,14 @@ CARD_VALUE = {
     'J': 11, 'Q': 12, 'K': 13, 'A': 14
 }
 
+SUIT_VALUE = {
+
+    'CLUBS': 0,
+    'DIAMONDS': 1,
+    'HEARTS': 2,
+    'SPADES': 3
+}
+
 HAND_RANKS = {
     "HIGH": 1,
     "PAIR": 2,
@@ -45,6 +53,26 @@ class Card:
         self.id = id
         self.suit = suit
         self.value = value
+
+    # Define equality based on name and grade
+    def __eq__(self, other):
+        if not isinstance(other, Card):
+            return NotImplemented
+        return (CARD_VALUE[self.value] == CARD_VALUE[other.value]) and (SUIT_VALUE[self.suit] == SUIT_VALUE[other.suit])
+
+    # Define less than based on grade
+    def __lt__(self, other):
+        if not isinstance(other, Card):
+            return NotImplemented
+        
+        # Primary comparison: value 
+        if CARD_VALUE[self.value] < CARD_VALUE[other.value]:
+            return True
+        elif CARD_VALUE[self.value] > CARD_VALUE[other.value]:
+            return False
+        else:
+            # Secondary comparison: name (if grades are equal)
+            return SUIT_VALUE[self.suit] < SUIT_VALUE[other.suit]
 
     def print(self):
         print(f"{self.value} of {self.suit} ({self.id})")

@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from typing import List, Dict
+
 from core.card import HAND_RANKS, SUIT_VALUE, CARD_VALUE
 from core.deck import Deck
 from core.table_state import TableState
@@ -22,7 +25,8 @@ class HandController:
         self.final_community_cards = []
         self.best_hand_name = ""
         self.best_five_card_combo = []
-        self.pot_share = 0
+        
+        self.winners_pots: List[Dict]
         
     # =========================
     # Hand setup
@@ -102,6 +106,7 @@ class HandController:
         self.table.pot = 0
         self.table.current_bet = 0
         self.table.end_hand = False
+        self.pots: List[Dict]
         
         self.table.dealer_index += 1
         if self.table.dealer_index >= self.table.num_players:
@@ -166,12 +171,27 @@ class HandController:
             case GamePhase.PREFLOP:
                 self._deal_burn()
                 self._deal_community(3)
-                
+                self.phase = GamePhase.FLOP
+
+                # Apply monte_carlo_hand_probabilities
+                for player in self.table.players:
+                    if player.playing:
+                        hand_probabilities = self.evaluator.evaluate_monte_carlo_hand_probabilities(self.phase, self.table, player)
+                        player.hand_probabilities = hand_probabilities
+                        player.best_hands_probability()
+
                 self.phase = GamePhase.FLOP
 
             case GamePhase.FLOP:
                 self._deal_burn()
                 self._deal_community(1)
+
+                # Apply monte_carlo_hand_probabilities
+                for player in self.table.players:
+                    if player.playing:
+                        hand_probabilities = self.evaluator.evaluate_monte_carlo_hand_probabilities(self.phase, self.table, player)
+                        player.hand_probabilities = hand_probabilities
+                        player.best_hands_probability()
                 
                 self.phase = GamePhase.TURN
 
@@ -227,23 +247,26 @@ class HandController:
     def _showdown(self):
 
         showdown = Showdown(self.table, self.evaluator)
+
         self.final_community_cards = sorted(self.table.community_cards)
         self.winning_players = showdown.winning_players
-        self.best_five_card_combo = showdown.best_five_card_combo
-        self.pot_share = showdown.pot_share
+
+        self.best_five_card_combo = showdown.best_five_card_combo.copy()
+        self.winners_pots = showdown.winners_pots.copy()
         self.best_hand_name = showdown.best_hand_name
 
         for player in self.table.players:
-            for winner in self.winning_players:
-                if winner.id == player.id:
+            for pot in self.winners_pots:
+                for winner in pot['winners']:
+                    if winner.id == player.id:
 
-                    if showdown.best_hand_value[0] > player.best_hand_value:
-                        player.best_hand_value = showdown.best_hand_value[0]
-                        player.best_hand = self.best_five_card_combo
+                        if pot['best_hand_value'][0] > player.best_hand_value:
+                            player.best_hand_value = pot['best_hand_value'][0]
+                            player.best_hand = pot['best_five_card_combo']
 
-                    if showdown.pot_share > player.largest_potshare:
-                        player.largest_potshare = showdown.pot_share
+                        if pot['amount'] > player.largest_potshare:
+                            player.largest_potshare = pot['amount']
 
-                    player.rake(showdown.pot_share)
+                        player.rake(pot['amount'])
         
         self.reset_round()

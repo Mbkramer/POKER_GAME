@@ -1,4 +1,6 @@
-# core/table_state.py
+from dataclasses import dataclass
+from typing import List, Dict
+
 from typing import List
 from core.player import Player
 from core.card import Card
@@ -22,6 +24,7 @@ class TableState:
         self.deck: List[Card] = []
         
         self.pot = 0
+        self.pots: List[Dict]
         self.current_bet = 0
         
         self.dealer_index = 0

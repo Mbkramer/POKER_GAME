@@ -30,6 +30,7 @@ TRANSPARENT_GOLD = (255, 215, 0, 128)
 TRANSPARENT_BLUE = (0, 0, 255, 128)
 GREEN = (0, 255, 0)
 DARK_GREEN = (0, 100, 0)
+DARK_YELLOW = (139, 128, 0)
 RED = (255, 0, 0)
 DARK_RED = (139, 0, 0)
 BLACK = (0, 0, 0)
@@ -460,6 +461,7 @@ class Button:
             elif event.key == pg.K_r and self.text == "RAISE":
 
                 self.active = True
+
                 if self.active:
                     self.color = DARK_GREEN
                     bet_decision = self.text
@@ -581,7 +583,7 @@ def draw_pot(pot, chip_images):
 
     return pot_image
 
-def draw_player_images(table, card_images, chip_images):
+def draw_player_images(hc, table, card_images, chip_images):
 
     player_images = []
 
@@ -608,6 +610,8 @@ def draw_player_images(table, card_images, chip_images):
         player_image["BET"] = player.bet
         player_image["PLAYING"] = player.playing
         player_image["HAND"] = []
+        
+        player_image["PROBS"] = []
 
         if len(player.hand) == 2:
             player_image["HAND"] = []
@@ -725,6 +729,9 @@ class PygameUI:
         self.hold_player_images = []
         self.hold_winner_images = []
         self.hold_player_action = ""
+
+        self.first_flop = True
+        self.first_turn = True
 
         self.user_input = ""
 
@@ -874,6 +881,8 @@ class PygameUI:
                 self.new_round_button.handle_new_round_button_event(event)
                 if self.new_round_button.active:
                     self.hand_counter+=1
+                    self.first_flop = True
+                    self.first_turn = True
                     self.new_round_button.active = False
                     hc._advance_phase()
             
@@ -952,16 +961,35 @@ class PygameUI:
         if hc.phase == GamePhase.GAMEOVER:
             self.game_running=False
 
+        self.pot_image = draw_pot(hc.table.pot, self.chip_images)
+        self.player_images = draw_player_images(hc.phase, hc.table, self.card_images, self.chip_images)
+
         phase_text = ""
         transparent_surface = pg.Surface((CARD_WIDTH-2, CARD_HEIGHT-2), pg.SRCALPHA)
         transparent_surface.fill(TRANSPARENT_GOLD)
 
         if hc.phase == GamePhase.PREFLOP: 
             phase_text = "PRE FLOP"
+
         if hc.phase == GamePhase.FLOP: 
             phase_text = "FLOP"
+            if self.first_flop == True:
+                for player in hc.table.players:
+                    for player_image in self.player_images:
+                        if player.id == player_image["ID"]:
+                            player_image["PROBS"] = player.best_hand_probs.copy()
+            self.first_flop == False
+
         if hc.phase == GamePhase.TURN: 
+
             phase_text = "TURN"
+            if self.first_turn == True:
+                for player in hc.table.players:
+                    for player_image in self.player_images:
+                        if player.id == player_image["ID"]:
+                            player_image["PROBS"] = player.best_hand_probs.copy()
+            self.first_turn == False
+
         if hc.phase == GamePhase.RIVER: 
             phase_text = "RIVER"
         if hc.phase == GamePhase.SHOWDOWN: 
@@ -975,9 +1003,6 @@ class PygameUI:
         for card in hc.deck.cards: 
             screen.blit(self.card_images["Back Red 1.png"], (DEALER_PLACEMENT_X, DEALER_PLACEMENT_Y-1*deck_spread))
             deck_spread+=1
-
-        self.pot_image = draw_pot(hc.table.pot, self.chip_images)
-        self.player_images = draw_player_images(hc.table, self.card_images, self.chip_images)
 
         # Community cards
         if len(hc.table.community_cards)>0:
@@ -1111,6 +1136,27 @@ class PygameUI:
                     if player_image["ID"] == hc.betting_round.current_index:
                         screen.blit(player_image["HAND"][1][1], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
                         screen.blit(player_image["HAND"][0][1], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+
+                        #Hand helper
+                        if (hc.phase == GamePhase.FLOP and self.first_flop == True) or (hc.phase == GamePhase.TURN and self.first_turn == True):    
+                            try:
+                                large_hand_prob = player_image["PROBS"][0]
+                                large_hand_prob_text = self.player_font.render(f"{large_hand_prob["HAND"]} PROBABILITY %{round(large_hand_prob["PROBABILITY"],2)}", True, GREEN)
+                                screen.blit(large_hand_prob_text, (WINDOW_WIDTH-300, 10))
+                            except Exception as e:
+                                pass
+                            try:
+                                moderate_hand_prob = player_image["PROBS"][1]
+                                moderate_hand_prob_text = self.player_font.render(f"{moderate_hand_prob["HAND"]} PROBABILITY %{round(moderate_hand_prob["PROBABILITY"])}", True, GOLD)
+                                screen.blit(moderate_hand_prob_text, (WINDOW_WIDTH-300, 25))
+                            except Exception as e:
+                                pass
+                            try:
+                                small_hand_prob = player_image["PROBS"][2]
+                                small_hand_prob_text = self.player_font.render(f"{small_hand_prob["HAND"]} PROBABILITY %{round(small_hand_prob["PROBABILITY"])}", True, RED) 
+                                screen.blit(small_hand_prob_text, (WINDOW_WIDTH-300, 40))
+                            except Exception as e:
+                                pass
                     else:
                         screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
                         screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
@@ -1197,10 +1243,18 @@ class PygameUI:
             for winner in hc.winning_players:
                 winning_players = winning_players + f"PLAYER {winner.id} "
 
+            pot_share = 0
+
+            for pot in hc.winners_pots:
+                for winner in pot['winners']:
+                    if winner.id == player_image['ID']:
+                        pot_share+=pot['amount']
+
             hud_window_header_text = self.hud_header_font.render(f"HAND {self.hand_counter}: {phase_text}", True, WHITE)
             winning_players_text = self.player_font.render(winning_players, True, BLACK)
-            pot_share_text = self.player_font.render(f"POT SHARE: ${hc.pot_share}", True, BLACK)
+            pot_share_text = self.player_font.render(f"POT SHARE: ${pot_share}", True, BLACK)
             best_hand_name_text = self.player_font.render(f"HAND: {hc.best_hand_name}", True, BLACK)
+
             screen.blit(hud_window_header_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+110))
             screen.blit(winning_players_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y + HUD_WINDOW_HEIGHT/2))
             screen.blit(pot_share_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+225))
@@ -1238,7 +1292,7 @@ class PygameUI:
         increment = 0
         for card in winner.best_hand:
             card_image = self.card_images[f"{card.id}.png"]
-            rect_x = (GAME_OVER_PLACEMENT_X+GAME_OVER_WIDTH/2) + increment * (CARD_WIDTH/2)
+            rect_x = (GAME_OVER_PLACEMENT_X+20  + GAME_OVER_WIDTH/2 + FLAT_CHIP_WIDTH + 2*FLAT_CHIP_WIDTH) + increment * (CARD_WIDTH/2)
             rect_y = (GAME_OVER_PLACEMENT_Y+110)
             new_size = (CARD_WIDTH/2, CARD_HEIGHT/2)
             # Scale the image
@@ -1325,7 +1379,8 @@ class PygameUI:
             self._handle_setup_events(screen)
             self._render(screen, None)
 
-        hc = HandController(self.table, HandEvaluator())
+        handevaluator = HandEvaluator()
+        hc = HandController(self.table, handevaluator)
         hc.start_hand()
 
         # renders game window input

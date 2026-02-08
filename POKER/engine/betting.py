@@ -28,6 +28,8 @@ class BettingRound:
 
         self.last_raiser_index: int | None = None
         self.active = True
+        self.pots = List[Dict]
+
 
     def apply(self, action: PlayerAction) -> None:
 
@@ -60,6 +62,10 @@ class BettingRound:
 
         self.table.players[action.player_index].touched = True
         self._check_complete()
+
+        if not self.active:
+            self._resolve_side_pots()
+
         if self.active:
             self._advance_turn()
 
@@ -138,25 +144,36 @@ class BettingRound:
 
         self.active = True
 
+    # =========================
+    # Side pot resolution
+    # =========================
 
+    def _resolve_side_pots(self) -> None:
+
+        contributing_players = [
+            p for p in self.table.players 
+            if p.bet > 0 and p.playing
+        ]
+            
+        if not contributing_players:
+            return
+            
+        self.pots = define_side_pots(contributing_players)
+        self._get_side_pots()
+
+    def _get_side_pots(self) -> List[Dict]:
+        self.table.pots = self.pots.copy()
+        
 # =========================
-# Side pot resolution
+# Define side pots
 # =========================
 
-def resolve_side_pots(players: List[Player]) -> List[Dict]:
-    """
-    Breaks total contributions into main pot + side pots.
+def define_side_pots(players: List[Player]) -> List[Dict]:
 
-    Returns a list of pots in order:
-    [
-        { "amount": int, "eligible": List[Player] },
-        ...
-    ]
-    """
     contributions = {
-        p: p.current_bet
+        p: p.bet  # Use p.bet to get current round contribution
         for p in players
-        if p.current_bet > 0
+        if p.bet > 0
     }
 
     pots: List[Dict] = []

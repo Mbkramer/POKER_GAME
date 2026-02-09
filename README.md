@@ -53,4 +53,10 @@ Hand evaluation utilities
 
 Probability‑ready architecture for future Monte Carlo or solver integration
 
+
+Incorporating data from the following sources:
+
 Cattral, R. & Oppacher, F. (2002). Poker Hand [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5KW38.
+
+MIT License
+Copyright (c) 2024-2025 Universal, Open, Free, and Transparent Computer Poker Research Group

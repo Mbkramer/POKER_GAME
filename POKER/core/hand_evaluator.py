@@ -18,24 +18,27 @@ class HandEvaluator:
     def __init__(self):
         pass
 
-    def evaluate_5_card_hand(self, cards: list[Card]):
+    @lru_cache(maxsize=16384) # 1MB
+    def _evaluate_5_card_hand_cached(self, card_tuple):
 
         values = []
         suits = []
 
-        for card in cards:
-            values.append(CARD_VALUE[card.value])
-            suits.append(card.suit)
+        for value, suit in card_tuple:
+            values.append(value)
+            suits.append(suit)
 
         values.sort(reverse=True)
         value_counter = Counter(values)
 
         # Flush check
-        is_flush = True
+        is_flush = False
         for suit in suits:
             if suit != suits[0]:
                 is_flush = False
                 break
+            elif suit == suits[0]:
+                is_flush = True
 
         # Straight check (Ace high or low)
         unique_values = sorted(set(values), reverse=True)
@@ -53,14 +56,15 @@ class HandEvaluator:
                 is_straight = True
                 straight_high = 5
 
+        # Straight Flush
+        if is_straight and is_flush:
+            return (HAND_RANKS["STRAIGHT_FLUSH"], straight_high)
+        
+        # Check Grouped Values 
         grouped_values = sorted(
             value_counter.items(),
             key=lambda x: (-x[1], -x[0])
         )
-
-        # Straight Flush
-        if is_straight and is_flush:
-            return (HAND_RANKS["STRAIGHT_FLUSH"], straight_high)
 
         # Four of a Kind
         if grouped_values[0][1] == 4:
@@ -80,7 +84,7 @@ class HandEvaluator:
 
         # Flush
         if is_flush:
-            return (HAND_RANKS["FLUSH"], values)
+            return (HAND_RANKS["FLUSH"], tuple(values))  # Convert to tuple for hashability
 
         # Straight
         if is_straight:
@@ -95,7 +99,7 @@ class HandEvaluator:
             return (
                 HAND_RANKS["TRIPLES"],
                 grouped_values[0][0],
-                kickers
+                tuple(kickers)  # Convert to tuple for hashability
             )
 
         # Two Pair
@@ -120,18 +124,32 @@ class HandEvaluator:
             return (
                 HAND_RANKS["PAIR"],
                 grouped_values[0][0],
-                kickers
+                tuple(kickers)  # Convert to tuple for hashability
             )
 
         # High Card
-        return (HAND_RANKS["HIGH"], values)
-    
+        return (HAND_RANKS["HIGH"], tuple(values))  # Convert to tuple for hashability
+
+    def evaluate_5_card_hand(self, cards: list[Card]):
+
+        # Convert cards to a sorted tuple of (value, suit) pairs for consistent caching
+        card_tuple = tuple(sorted(
+            ((CARD_VALUE[card.value], card.suit) for card in cards),
+            reverse=True
+        ))
+        
+        result = self._evaluate_5_card_hand_cached(card_tuple)
+        
+        # Convert tuples back to lists for backward compatibility
+        if isinstance(result[-1], tuple) and len(result[-1]) > 1 and isinstance(result[-1][0], int):
+            # This is a list of kickers or values, convert back to list
+            return result[:-1] + (list(result[-1]),)
+        return result
     
     def evaluate_7_card_hand(self, cards):
 
         best_hand_value = None
         best_5_card_combo = []
-
 
         for five_card_combo in combinations(cards, 5):
             current_value = self.evaluate_5_card_hand(five_card_combo)
@@ -142,7 +160,7 @@ class HandEvaluator:
 
         return best_hand_value, best_5_card_combo
     
-    # Much faster
+    # Calculate player hand probabailities at flop and turn
     def evaluate_monte_carlo_hand_probabilities(self, phase, table, player):
 
         num_unknown_cards = 52 - 2 - len(table.community_cards)
@@ -186,7 +204,7 @@ class HandEvaluator:
             full_hand = known_cards + sampled_cards
             
             # Evaluate best 5-card hand
-            best_hand_value, sim = self.evaluate_7_card_hand(full_hand)
+            best_hand_value, _ = self.evaluate_7_card_hand(full_hand)
             hand_rank = best_hand_value[0]
             
             #Increment the appropriate counter
@@ -195,25 +213,28 @@ class HandEvaluator:
                     hand_outs[rank_name] += 1
                     break
         try:
-            hand_probabilities = self.calculate_hand_probabilities(hand_outs, num_unknown_cards)
+            hand_probabilities = self.calculate_hand_probabilities(hand_outs, num_simulations) # from num unknown cards..
         except Exception as e:
             print("Calculate Hand Probs Error occured")
             print(e)
 
         return hand_probabilities
             
-    def calculate_hand_probabilities(self, hand_outs, num_unknown_cards):
+    def calculate_hand_probabilities(self, hand_outs, num_simulations):
 
-        hand_probabilities = {
-            "HIGH": ((hand_outs["HIGH"])/num_unknown_cards),
-            "PAIR": ((hand_outs["PAIR"])/num_unknown_cards),
-            "TWO_PAIR": ((hand_outs["TWO_PAIR"])/num_unknown_cards),
-            "TRIPLES": ((hand_outs["TRIPLES"])/num_unknown_cards),
-            "STRAIGHT": ((hand_outs["STRAIGHT"])/num_unknown_cards),
-            "FLUSH": ((hand_outs["FLUSH"])/num_unknown_cards),
-            "FULL_HOUSE": ((hand_outs["FULL_HOUSE"])/num_unknown_cards),
-            "QUADS": ((hand_outs["QUADS"])/num_unknown_cards),
-            "STRAIGHT_FLUSH": ((hand_outs["STRAIGHT_FLUSH"])/num_unknown_cards)
+            raw = {k: v / num_simulations for k, v in hand_outs.items()}
+
+            # Cumulative: "at least X" probabilities
+            hand_probabilities = {
+                "HIGH":          1.0,
+                "PAIR":          raw["PAIR"] + raw["TWO_PAIR"] + raw["TRIPLES"] + raw["STRAIGHT"] + raw["FLUSH"] + raw["FULL_HOUSE"] + raw["QUADS"] + raw["STRAIGHT_FLUSH"],
+                "TWO_PAIR":      raw["TWO_PAIR"] + raw["TRIPLES"] + raw["STRAIGHT"] + raw["FLUSH"] + raw["FULL_HOUSE"] + raw["QUADS"] + raw["STRAIGHT_FLUSH"],
+                "TRIPLES":       raw["TRIPLES"] + raw["FULL_HOUSE"] + raw["QUADS"] + raw["STRAIGHT_FLUSH"],
+                "STRAIGHT":      raw["STRAIGHT"] + raw["STRAIGHT_FLUSH"],
+                "FLUSH":         raw["FLUSH"] + raw["STRAIGHT_FLUSH"],
+                "FULL_HOUSE":    raw["FULL_HOUSE"] + raw["QUADS"] + raw["STRAIGHT_FLUSH"],
+                "QUADS":         raw["QUADS"] + raw["STRAIGHT_FLUSH"],
+                "STRAIGHT_FLUSH": raw["STRAIGHT_FLUSH"],
             }
-        
-        return hand_probabilities
+
+            return hand_probabilities

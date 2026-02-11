@@ -29,6 +29,18 @@ HAND_RANKS = {
     "STRAIGHT_FLUSH": 9
 }
 
+RANK_HANDS = {
+    1: 'HIGH',
+    2: 'PAIR',
+    3: 'TWO_PAIR',
+    4: 'TRIPLES',
+    5: 'STRAIGHT',
+    6: 'FLUSH',
+    7: 'FULL_HOUSE',
+    8: 'QUADS',
+    9: 'STRAIGHT_FLUSH'
+}
+
 HAND_RANK_NAMES = {
     HAND_RANKS["HIGH"]: "High Card",
     HAND_RANKS["PAIR"]: "Pair",
@@ -53,6 +65,9 @@ class Card:
         self.id = id
         self.suit = suit
         self.value = value
+
+    def __hash__(self):
+        return hash((CARD_VALUE[self.value], SUIT_VALUE[self.suit]))
 
     # Define equality based on name and grade
     def __eq__(self, other):

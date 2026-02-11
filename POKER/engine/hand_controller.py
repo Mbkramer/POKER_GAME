@@ -174,11 +174,7 @@ class HandController:
                 self.phase = GamePhase.FLOP
 
                 # Apply monte_carlo_hand_probabilities
-                for player in self.table.players:
-                    if player.playing:
-                        hand_probabilities = self.evaluator.evaluate_monte_carlo_hand_probabilities(self.phase, self.table, player)
-                        player.hand_probabilities = hand_probabilities
-                        player.best_hands_probability()
+                self._run_monte_carlo_predictions()
 
                 self.phase = GamePhase.FLOP
 
@@ -187,11 +183,7 @@ class HandController:
                 self._deal_community(1)
 
                 # Apply monte_carlo_hand_probabilities
-                for player in self.table.players:
-                    if player.playing:
-                        hand_probabilities = self.evaluator.evaluate_monte_carlo_hand_probabilities(self.phase, self.table, player)
-                        player.hand_probabilities = hand_probabilities
-                        player.best_hands_probability()
+                self._run_monte_carlo_predictions()
                 
                 self.phase = GamePhase.TURN
 
@@ -214,6 +206,15 @@ class HandController:
                     self.game_over()
                 
         self._start_betting_round()
+
+    def _run_monte_carlo_predictions(self):
+
+        # Apply monte_carlo_hand_probabilities
+        for player in self.table.players:
+            if player.playing:
+                hand_probabilities = self.evaluator.evaluate_monte_carlo_hand_probabilities(self.phase, self.table, player)
+                player.hand_probabilities = hand_probabilities
+                player.best_hands_probability()
 
     #flash hand to showdown
     def _close_hand(self):

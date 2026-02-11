@@ -77,7 +77,7 @@ GAME_OVER_PLACEMENT_Y = 100
 # Graph parameters
 GRAPH_START_X = GAME_OVER_PLACEMENT_X + GAME_OVER_WIDTH/8
 GRAPH_START_Y = GAME_OVER_PLACEMENT_Y + GAME_OVER_HEIGHT - 25
-GRAPH_HEIGHT = 75
+GRAPH_HEIGHT = 100
 X_SPACING = 10
 
 #Hud Window
@@ -1141,19 +1141,19 @@ class PygameUI:
                         if (hc.phase == GamePhase.FLOP and self.first_flop == True) or (hc.phase == GamePhase.TURN and self.first_turn == True):    
                             try:
                                 large_hand_prob = player_image["PROBS"][0]
-                                large_hand_prob_text = self.player_font.render(f"{large_hand_prob["HAND"]} PROBABILITY %{round(large_hand_prob["PROBABILITY"],2)}", True, GREEN)
+                                large_hand_prob_text = self.player_font.render(f"{large_hand_prob["HAND"]} PROBABILITY %{round(large_hand_prob["PROBABILITY"]*100,2)}", True, GREEN)
                                 screen.blit(large_hand_prob_text, (WINDOW_WIDTH-300, 10))
                             except Exception as e:
                                 pass
                             try:
                                 moderate_hand_prob = player_image["PROBS"][1]
-                                moderate_hand_prob_text = self.player_font.render(f"{moderate_hand_prob["HAND"]} PROBABILITY %{round(moderate_hand_prob["PROBABILITY"])}", True, GOLD)
+                                moderate_hand_prob_text = self.player_font.render(f"{moderate_hand_prob["HAND"]} PROBABILITY %{round(moderate_hand_prob["PROBABILITY"]*100)}", True, GOLD)
                                 screen.blit(moderate_hand_prob_text, (WINDOW_WIDTH-300, 25))
                             except Exception as e:
                                 pass
                             try:
                                 small_hand_prob = player_image["PROBS"][2]
-                                small_hand_prob_text = self.player_font.render(f"{small_hand_prob["HAND"]} PROBABILITY %{round(small_hand_prob["PROBABILITY"])}", True, RED) 
+                                small_hand_prob_text = self.player_font.render(f"{small_hand_prob["HAND"]} PROBABILITY %{round(small_hand_prob["PROBABILITY"]*100)}", True, RED) 
                                 screen.blit(small_hand_prob_text, (WINDOW_WIDTH-300, 40))
                             except Exception as e:
                                 pass

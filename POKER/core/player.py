@@ -87,41 +87,37 @@ class Player:
     def best_hands_probability(self):
 
         hand_probs = []
-        increment = 60
+        increment = .60
 
         for i in range (4):
 
-            increment = increment - (15 * i)
+            increment = increment - (.15 * i)
             
-            if self.hand_probabilities["STRAIGHT_FLUSH"] > 15:
+            if self.hand_probabilities["STRAIGHT_FLUSH"] > .15:
                 hand_prob = {"HAND": "STRAIGHT_FLUSH", "PROBABILITY": self.hand_probabilities["STRAIGHT_FLUSH"]}
                 hand_probs.append(hand_prob)
-            elif self.hand_probabilities["QUADS"] * HAND_RANKS["QUADS"] > increment and self.hand_probabilities["QUADS"] > 5:
+            if self.hand_probabilities["QUADS"] * HAND_RANKS["QUADS"] > increment and self.hand_probabilities["QUADS"] > .05:
                 hand_prob = {"HAND": "QUADS", "PROBABILITY": self.hand_probabilities["QUADS"]}
                 hand_probs.append(hand_prob)
-            elif self.hand_probabilities["FULL_HOUSE"] * HAND_RANKS["FULL_HOUSE"] > increment and self.hand_probabilities["FULL_HOUSE"] > 5:
+            if self.hand_probabilities["FULL_HOUSE"] * HAND_RANKS["FULL_HOUSE"] > increment and self.hand_probabilities["FULL_HOUSE"] > .05:
                 hand_prob = {"HAND": "FULL_HOUSE", "PROBABILITY": self.hand_probabilities["FULL_HOUSE"]}
                 hand_probs.append(hand_prob)
-            elif self.hand_probabilities["FLUSH"] * HAND_RANKS["FLUSH"] > increment and self.hand_probabilities["FLUSH"] > 5:
+            if self.hand_probabilities["FLUSH"] * HAND_RANKS["FLUSH"] > increment and self.hand_probabilities["FLUSH"] > .05:
                 hand_prob = {"HAND": "FLUSH", "PROBABILITY": self.hand_probabilities["FLUSH"]}
                 hand_probs.append(hand_prob)
-            elif self.hand_probabilities["STRAIGHT"] * HAND_RANKS["STRAIGHT"] > increment and self.hand_probabilities["STRAIGHT"] > 5:
+            if self.hand_probabilities["STRAIGHT"] * HAND_RANKS["STRAIGHT"] > increment and self.hand_probabilities["STRAIGHT"] > .05:
                 hand_prob = {"HAND": "STRAIGHT", "PROBABILITY": self.hand_probabilities["STRAIGHT"]}
                 hand_probs.append(hand_prob)
-            elif self.hand_probabilities["TRIPLES"] * HAND_RANKS["TRIPLES"] > increment and self.hand_probabilities["TRIPLES"] > 5:
+            if self.hand_probabilities["TRIPLES"] * HAND_RANKS["TRIPLES"] > increment and self.hand_probabilities["TRIPLES"] > .05:
                 hand_prob = {"HAND": "TRIPLES", "PROBABILITY": self.hand_probabilities["TRIPLES"]}
                 hand_probs.append(hand_prob)
-            elif self.hand_probabilities["TWO_PAIR"] * HAND_RANKS["TWO_PAIR"] > increment and self.hand_probabilities["TWO_PAIR"] > 5:
+            if self.hand_probabilities["TWO_PAIR"] * HAND_RANKS["TWO_PAIR"] > increment and self.hand_probabilities["TWO_PAIR"] > .05:
                 hand_prob = {"HAND": "TWO_PAIR", "PROBABILITY": self.hand_probabilities["TWO_PAIR"]}
                 hand_probs.append(hand_prob)
-            elif i <= 1:
-                if self.hand_probabilities["PAIR"] * HAND_RANKS["PAIR"] > increment and self.hand_probabilities["PAIR"] > 5:
+            if i <= 1:
+                if self.hand_probabilities["PAIR"] * HAND_RANKS["PAIR"] > increment and self.hand_probabilities["PAIR"] > .05:
                     hand_prob = {"HAND": "PAIR", "PROBABILITY": self.hand_probabilities["PAIR"]}
                     hand_probs.append(hand_prob)
-        
-        print(f"\nPLAYER {self.id} scores")
-        for hand_prob in hand_probs:
-            print(f"{hand_prob['HAND']} SCORE: {HAND_RANKS[hand_prob['HAND']]*hand_prob["PROBABILITY"]}']")
 
         # Remove duplicates, keeping only the first occurrence of each hand type 
         seen_items = {}

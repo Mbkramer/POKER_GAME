@@ -3,7 +3,7 @@ from itertools import combinations
 import random
 
 from functools import lru_cache
-from core.card import CARD_VALUE, HAND_RANKS, HAND_RANK_NAMES, VALUE_NAME
+from core.card import CARD_VALUE, VALUE_NAME
 from core.card import Card
 from core.deck import Deck
 from core.table_state import TableState
@@ -12,6 +12,42 @@ from engine.game_state import GamePhase
 import pandas as pd
 import json 
 from pathlib import Path
+
+HAND_RANKS = {
+    "HIGH": 1,
+    "PAIR": 2,
+    "TWO_PAIR": 3,
+    "TRIPLES": 4,
+    "STRAIGHT": 5,
+    "FLUSH": 6,
+    "FULL_HOUSE": 7,
+    "QUADS": 8,
+    "STRAIGHT_FLUSH": 9
+}
+
+RANK_HANDS = {
+    1: 'HIGH',
+    2: 'PAIR',
+    3: 'TWO_PAIR',
+    4: 'TRIPLES',
+    5: 'STRAIGHT',
+    6: 'FLUSH',
+    7: 'FULL_HOUSE',
+    8: 'QUADS',
+    9: 'STRAIGHT_FLUSH'
+}
+
+HAND_RANK_NAMES = {
+    HAND_RANKS["HIGH"]: "High Card",
+    HAND_RANKS["PAIR"]: "Pair",
+    HAND_RANKS["TWO_PAIR"]: "Two Pair",
+    HAND_RANKS["TRIPLES"]: "Three of a Kind",
+    HAND_RANKS["STRAIGHT"]: "Straight",
+    HAND_RANKS["FLUSH"]: "Flush",
+    HAND_RANKS["FULL_HOUSE"]: "Full House",
+    HAND_RANKS["QUADS"]: "Four of a Kind",
+    HAND_RANKS["STRAIGHT_FLUSH"]: "Straight Flush"
+}
 
 class HandEvaluator:
 

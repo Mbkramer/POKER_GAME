@@ -1,7 +1,18 @@
 from dataclasses import dataclass
 from typing import List
 from core.card import Card
-from core.card import HAND_RANKS
+
+HAND_RANKS = {
+    "HIGH": 1,
+    "PAIR": 2,
+    "TWO_PAIR": 3,
+    "TRIPLES": 4,
+    "STRAIGHT": 5,
+    "FLUSH": 6,
+    "FULL_HOUSE": 7,
+    "QUADS": 8,
+    "STRAIGHT_FLUSH": 9
+}
 
 #########
 # PLAYER CLASS
@@ -13,8 +24,13 @@ class Player:
         self.order = id
         self.cash = cash
         self.bet = 0
+        self.hand_bet = 0
         self.hand = []
         self.buy_in = buy_in
+
+        # New bot 
+        self.is_bot = False
+        self.bot = None
 
         # Game play variables
         self.folded = False
@@ -51,12 +67,14 @@ class Player:
 
     def place_bet(self, bet):
         self.bet += bet
+        self.hand_bet += bet
         self.cash -= bet
         return bet
     
     def fold(self):
         self.folded = True
         self.bet = 0
+        self.hand_bet = 0
     
     def rake(self, pot_share):
         self.cash += pot_share
@@ -134,15 +152,15 @@ class Player:
 
     def print_hand_probabilities(self):
         print(f"PLAYER {self.id} HAND PROBABILITIES\n")
-        print(f"HIGH: {self.hand_probabilities["HIGH"]}")
-        print(f"PAIR: {self.hand_probabilities["PAIR"]}")
-        print(f"TWO_PAIR: {self.hand_probabilities["TWO_PAIR"]}")
-        print(f"TRIPLES: {self.hand_probabilities["TRIPLES"]}")
-        print(f"STRAIGHT: {self.hand_probabilities["STRAIGHT"]}")
-        print(f"FLUSH: {self.hand_probabilities["FLUSH"]}")
-        print(f"FULL_HOUSE: {self.hand_probabilities["FULL_HOUSE"]}")
-        print(f"QUADS: {self.hand_probabilities["QUADS"]}")
-        print(f"STRAIGHT_FLUSH: {self.hand_probabilities["STRAIGHT_FLUSH"]}\n")
+        print(f"HIGH: {self.hand_probabilities['HIGH']}")
+        print(f"PAIR: {self.hand_probabilities['PAIR']}")
+        print(f"TWO_PAIR: {self.hand_probabilities['TWO_PAIR']}")
+        print(f"TRIPLES: {self.hand_probabilities['TRIPLES']}")
+        print(f"STRAIGHT: {self.hand_probabilities['STRAIGHT']}")
+        print(f"FLUSH: {self.hand_probabilities['FLUSH']}")
+        print(f"FULL_HOUSE: {self.hand_probabilities['FUSH']}")
+        print(f"QUADS: {self.hand_probabilities['QUADS']}")
+        print(f"STRAIGHT_FLUSH: {self.hand_probabilities['STRAIGHT_FLUSH']}\n")
     
     def __repr__(self) -> str:
         return (

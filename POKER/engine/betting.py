@@ -44,7 +44,7 @@ class BettingRound:
 
         match action.action_type:
             case ActionType.FOLD:
-                player.fold()
+                self._fold(player)
 
             case ActionType.CHECK:
                 if to_call != 0:
@@ -54,7 +54,7 @@ class BettingRound:
                 self._call(player, to_call)
 
             case ActionType.RAISE:
-                self._raise(player, to_call, action.raise_amount)
+                self._raise(player, action.raise_amount)
                 self.last_raiser_index = action.player_index
 
             case _:
@@ -69,7 +69,10 @@ class BettingRound:
         if self.active:
             self._advance_turn()
 
-    # Need to add in side pots in the if to_call >= cash logic
+    def _fold(self, player: Player) -> None:
+        self.table.live_money+=player.hand_bet
+        player.fold()
+
     def _call(self, player: Player, to_call: int) -> None:
         if to_call <= 0:
             return
@@ -83,24 +86,31 @@ class BettingRound:
         posted = player.place_bet(total)
         self.table.pot += posted
 
-    def _raise(self, player: Player, to_call: int, raise_amount: int) -> None:
-        if raise_amount <= 0:
-            raise ValueError("Raise amount must be positive")
-        if raise_amount <= self.table.current_bet:
-            raise ValueError("Raise amount must be double current bet")
+    def _raise(self, player: Player, raise_to: int) -> None:
 
-        total = to_call + raise_amount
+        min_raise_to = self.table.current_bet + self.table.last_raise_size 
+        all_in = player.bet + player.cash  
 
-        if total >= player.cash:
-            player.all_in = True
-            total = player.cash
+        # Clamp to stack (all-in)
+        raise_to = min(raise_to, all_in)
 
-        posted = player.place_bet(total)
+        is_all_in = False
+        # Check legality (unless all-in)
+        if raise_to == all_in:
+            is_all_in = True
 
-        if posted >= self.table.current_bet:
-            self.table.current_bet = player.bet
+        if not is_all_in and raise_to < min_raise_to:
+            raise ValueError("Illegal raise size")
 
+        # Chips actually committed
+        put_in = raise_to - player.bet
+        posted = player.place_bet(put_in)
         self.table.pot += posted
+
+        # Update betting state
+        if raise_to > self.table.current_bet:
+            self.table.last_raise_size = raise_to - self.table.current_bet
+            self.table.current_bet = raise_to
 
     def _advance_turn(self) -> None:
         """
@@ -171,9 +181,9 @@ class BettingRound:
 def define_side_pots(players: List[Player]) -> List[Dict]:
 
     contributions = {
-        p: p.bet  # Use p.bet to get current round contribution
+        p: p.hand_bet  # Using new hand_bet between streets.. bet used to determine betting round eligibility
         for p in players
-        if p.bet > 0
+        if p.hand_bet > 0 
     }
 
     pots: List[Dict] = []

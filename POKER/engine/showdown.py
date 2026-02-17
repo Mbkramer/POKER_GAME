@@ -1,6 +1,7 @@
 from typing import List, Dict
 from core.card import Card
-from core.card import CARD_VALUE, HAND_RANKS, HAND_RANK_NAMES
+from core.card import CARD_VALUE
+from core.hand_evaluator import  HAND_RANKS, HAND_RANK_NAMES
 from core.player import Player
 from core.table_state import TableState
 from core.hand_evaluator import HandEvaluator
@@ -52,7 +53,7 @@ class Showdown():
                 hand_value, best_five_card_combo = self.hand_evaluator.evaluate_7_card_hand(seven_card_hand)
                 player.assign_hand_value(hand_value)
 
-                if self.best_hand_value is None or hand_value[0] > self.best_hand_value[0]:
+                if self.best_hand_value is None or hand_value > self.best_hand_value:
 
                     self.best_hand_value = hand_value
                     self.best_five_card_combo = sorted(best_five_card_combo)

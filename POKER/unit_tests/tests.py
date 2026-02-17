@@ -4,7 +4,8 @@ from itertools import combinations
 import sys
 
 sys.path.append('POKER')
-from core.card import Card, HAND_RANK_NAMES, HAND_RANKS, RANK_HANDS, VALUE_NAME, CARD_VALUE, SUIT_VALUE
+from core.card import Card, VALUE_NAME, CARD_VALUE, SUIT_VALUE
+from core.hand_evaluator import HAND_RANK_NAMES, HAND_RANKS, RANK_HANDS
 from core.deck import Deck
 from core.hand_evaluator import HandEvaluator
 from core.player import Player
@@ -446,7 +447,7 @@ class tests:
 
         passed = True
         i=0
-        print(f"FOR EACH TEST IF HAND VALUE FLUSH IS ({HAND_RANKS["FLUSH"]})")
+        print(f"FOR EACH TEST IF HAND VALUE FLUSH IS (6)")
         for test in tests:
             if not test[2]:
                 passed = False
@@ -514,11 +515,11 @@ class tests:
 #        # Simple scenarios
 #        - Winner takes entire pot (no side pots)
 #        - Split pot between two players with identical hands
-##        - Split pot with odd chip (who gets the extra chip?)
+#        - Split pot with odd chip (who gets the extra chip?)
 #       
 #        # Side pot scenarios
 #        - One all-in player, two players continue betting
-##        - Multiple all-ins creating multiple side pots
+#        - Multiple all-ins creating multiple side pots
 #        - Player wins main pot but loses side pot
 #        - Player wins side pot but loses main pot
 #        - Player not eligible for side pot they didn't contribute to
@@ -534,14 +535,6 @@ class tests:
 #        - Everyone folds to last player (wins without showdown)
 #        - Rake/house fee deduction (if applicable)
 #
-#    def test_hand_prediction():
-#        # Probability calculations
-#        - Pre-flop: pocket aces vs random hand win rate (~85%)
-#        - Pre-flop: suited connectors vs overpair
-#        - Flop: flush draw probability (9 outs ≈ 35% by river)
-#        - Flop: open-ended straight draw (8 outs ≈ 31.5% by river)
-#        - Turn: drawing to specific outs with one card to come
-#        
 #        # Specific scenarios
 #        - Two overcards on flop (6 outs)
 #        - Gutshot straight draw (4 outs)

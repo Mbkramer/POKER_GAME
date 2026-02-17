@@ -24,8 +24,10 @@ class TableState:
         self.deck: List[Card] = []
         
         self.pot = 0
+        self.live_money = 0
         self.pots: List[Dict]
-        self.current_bet = 0
+        self.current_bet = buy_in
+        self.last_raise_size = buy_in
         
         self.dealer_index = 0
         self.small_blind = 0

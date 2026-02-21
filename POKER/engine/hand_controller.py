@@ -127,13 +127,19 @@ class HandController:
             "finishing_stacks": [0] * self.table.num_players
         }
 
+        print(self.table.small_blind)
+        print(self.table.big_blind)
+        
         phh['blinds_or_straddles'][self.table.small_blind] = self.table.buy_in/2
         phh['blinds_or_straddles'][self.table.big_blind] = self.table.buy_in
 
         for player in self.table.players:
             phh['starting_stacks'][player.id] = player.cash
             phh['seats'][player.id] = player.id
-            phh['players'][player.id] = str(player.id)
+            if player.is_bot:
+                phh['players'][player.id] = "B" + str(player.id)
+            elif not player.is_bot:
+                phh['players'][player.id] = "P" + str(player.id)
 
         self.phh = phh
 
@@ -145,10 +151,11 @@ class HandController:
     def start_hand(self) -> None:
 
         self.hand_counter+=1
-        self.load_phh()
 
         self.deck.shuffle()
         self._post_blinds()
+        self.load_phh()
+
         self._deal_hole_cards()
         self.muck = False
 
@@ -438,10 +445,6 @@ class HandController:
         self.best_five_card_combo = showdown.best_five_card_combo.copy()
         self.winners_pots = showdown.winners_pots.copy()
         self.best_hand_name = showdown.best_hand_name
-
-        cash_in_game=self.table.pot
-        for player in self.table.players:
-            cash_in_game+=player.cash
         
         live_money_share = self.table.live_money / len(self.winning_players) #Share of folded money
 
@@ -459,14 +462,16 @@ class HandController:
 
                         if player.muck:
                             self.muck = True
+                            self.phh['actions'].append(f"p{player.id} sm")
 
                         player.rake(pot['amount'])
 
+        if not self.muck:
+            for player in self.table.players:
+                if player.playing and not player.folded:
+                    self.phh['actions'].append(f"p{player.id} sm {player.hand[0].id}{player.hand[1].id}")
+
         for player in self.winning_players:
             player.rake(live_money_share)
-
-        cash_in_game = 0
-        for player in self.table.players:
-            cash_in_game += player.cash
 
         self.reset_round()

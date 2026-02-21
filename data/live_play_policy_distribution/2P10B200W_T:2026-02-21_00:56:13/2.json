@@ -1,0 +1,41 @@
+{
+    "variant": "NT",
+    "ante_trimming_status": "false",
+    "antes": [
+        0,
+        0
+    ],
+    "blinds_or_straddles": [
+        5.0,
+        10
+    ],
+    "min_bet": 10,
+    "starting_stacks": [
+        190.0,
+        210.0
+    ],
+    "actions": [
+        "d dh p0 HKS4",
+        "d dh p1 CJHJ",
+        "p1 cbr 20",
+        "p0 cbr 0",
+        "d db D5H6H9",
+        "p1 cbr 27",
+        "p0 f",
+        "d db C2",
+        "d db D10"
+    ],
+    "hand": 2,
+    "seats": [
+        0,
+        1
+    ],
+    "players": [
+        "0",
+        "1"
+    ],
+    "finishing_stacks": [
+        170.0,
+        230.0
+    ]
+}

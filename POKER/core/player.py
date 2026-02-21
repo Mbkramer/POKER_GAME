@@ -37,6 +37,7 @@ class Player:
         self.all_in = False
         self.playing = True
         self.touched = False
+        self.muck = False
 
         # End game stats
         self.game_hand_value = None

@@ -34,6 +34,11 @@ class Showdown():
 
     def find_winning_hands(self):
 
+        # Handle muck
+        if len(self.table.pots) == 1:
+            if len(self.table.pots[0]['eligible']) == 1:
+                self.table.players[self.table.pots[0]['eligible'][0].id].muck=True
+
         for pot in self.table.pots:
 
             amount = pot['amount']

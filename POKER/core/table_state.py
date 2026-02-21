@@ -28,6 +28,7 @@ class TableState:
         self.pots: List[Dict]
         self.current_bet = buy_in
         self.last_raise_size = buy_in
+        self.n_raises = 0
         
         self.dealer_index = 0
         self.small_blind = 0

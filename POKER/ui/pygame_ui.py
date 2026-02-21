@@ -2,10 +2,9 @@ from engine.game_state import GamePhase
 from core.table_state import TableState
 from core.player import Player
 from core.deck import Deck
-from core.card import HAND_RANK_NAMES, HAND_RANKS
+from core.hand_evaluator import HandEvaluator, HAND_RANK_NAMES, HAND_RANKS
 from core.player_action import ActionType, PlayerAction
 from engine.hand_controller import HandController
-from core.hand_evaluator import HandEvaluator
 
 import pygame as pg
 import sys
@@ -40,6 +39,10 @@ BACKGROUND_IMAGE_PATH = "GAME_IMAGES/TABLE/Poker_Table_Dark.png"
 MAX_PLAYERS = 6
 
 #Text
+arcade_classic_font_path = 'GAME_IMAGES/TABLE/ARCADECLASSIC.TTF'
+maestro_font_path = 'GAME_IMAGES/TABLE/Maesto-Regular_demo.otf'
+jmh_font_path = 'GAME_IMAGES/TABLE/JMH Cthulhumbus Arcade.otf'
+
 POT_FONT = "monaco"
 MONEY_FONT = "monaco"
 PLAYER_FONT = "arial"
@@ -171,7 +174,7 @@ class InputBox:
         self.active = False
         self.stored_input = 0
 
-    def handle_event(self, event):
+    def handle_event(self, event, min_value):
 
         if event.type == pg.MOUSEBUTTONDOWN:
             
@@ -188,10 +191,15 @@ class InputBox:
                     # When 'Enter' is pressed, store the text and reset the input box
                     try:
                         store = int(self.text)
-                        if store > 0:
+                        if store >= min_value:
                             self.active = False
                             self.color = COLOR_INACTIVE
                             self.stored_input = store
+                        else:
+                            self.active = False
+                            self.color = COLOR_ACTIVE
+                            self.text = f"MIN: {min_value}"
+                            self.stored_input = 0
                     except:
                         self.text = "0"
                     
@@ -537,8 +545,7 @@ def draw_chip_images(CHIPS_FOLDER_PATH):
 
             if "TOP" in filename:
                 new_size = (TOP_CHIP_WIDTH, TOP_CHIP_HEIGHT)
-
-            if "FLAT" in filename:
+            elif "FLAT" in filename:
                 new_size = (FLAT_CHIP_WIDTH, FLAT_CHIP_HEIGHT)
 
             # Scale the image
@@ -610,6 +617,7 @@ def draw_player_images(hc, table, card_images, chip_images):
         player_image["BET"] = player.bet
         player_image["PLAYING"] = player.playing
         player_image["HAND"] = []
+        player_image["IS_BOT"] = player.is_bot
         
         player_image["PROBS"] = []
 
@@ -633,6 +641,7 @@ def draw_player_images(hc, table, card_images, chip_images):
 
         player_image["FOLDED"] = player.folded
         player_image["ALL_IN"] = player.all_in
+        player_image["MUCK"] = player.muck
 
         player_placement_x = int(ELLIPSE_CENTER_X + (a * math.cos(start + player_location_angle*player_spot)))
         player_placement_y = int(ELLIPSE_CENTER_Y + (b * math.sin(start + player_location_angle*player_spot)))
@@ -751,10 +760,10 @@ class PygameUI:
         self.clock = pg.time.Clock()
 
         self.pot_font = pg.font.SysFont(POT_FONT, 20)
-        self.money_font = pg.font.SysFont(MONEY_FONT, 10)
+        self.money_font = pg.font.SysFont(POT_FONT, 10)
         self.player_font = pg.font.SysFont(PLAYER_FONT, 12)
-        self.header_font = pg.font.SysFont(INPUT_FONT, 25)
-        self.hud_header_font = pg.font.SysFont(INPUT_FONT, 20)
+        self.header_font = pg.font.Font(arcade_classic_font_path, 35)
+        self.hud_header_font = pg.font.SysFont(PLAYER_FONT, 20)
         self.input_font = pg.font.SysFont(INPUT_FONT, 10)
 
         #Background
@@ -801,12 +810,12 @@ class PygameUI:
     def _handle_setup_events(self, screen):
         for event in pg.event.get():
             #buy in
-            self.bet_input_box.handle_event(event)
+            self.bet_input_box.handle_event(event, 0)
             if self.bet_input_box.stored_input != 0:
                 self.hold_buy_in = self.bet_input_box.stored_input
             
             #wallet input box
-            self.wallet_input_box.handle_event(event)
+            self.wallet_input_box.handle_event(event, 0)
             if self.wallet_input_box.stored_input != 0:
                 self.hold_wallet = self.wallet_input_box.stored_input
 
@@ -856,7 +865,7 @@ class PygameUI:
                 self.hold_player_action = r
 
             # handle event for raise input
-            self.raise_input_box.handle_event(event)
+            self.raise_input_box.handle_event(event, min(hc.table.current_bet + hc.table.last_raise_size, hc.table.players[hc.betting_round.current_index].cash))
 
             # handle event for log button and log player action
             self.log_button.handle_log_button_event(event)
@@ -1039,7 +1048,7 @@ class PygameUI:
             screen.blit(self.com_deck[2], (COMMUNITY_CARDS_PLACEMENT_X+2*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
             screen.blit(self.com_deck[3], (COMMUNITY_CARDS_PLACEMENT_X+3*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
             screen.blit(self.com_deck[4], (COMMUNITY_CARDS_PLACEMENT_X+4*CARD_WIDTH, COMMUNITY_CARDS_PLACEMENT_Y))
-        elif hc.phase == GamePhase.SHOWDOWN:
+        elif hc.phase == GamePhase.SHOWDOWN and hc.muck == False:
             try:
                 screen.blit(self.hold_river[0], (COMMUNITY_CARDS_PLACEMENT_X, COMMUNITY_CARDS_PLACEMENT_Y))
                 for card in hc.best_five_card_combo:
@@ -1085,16 +1094,16 @@ class PygameUI:
         for player_image in self.player_images:
             
             pg.draw.rect(screen, DARK_GRAY, (player_image["PLAYER_PLACEMENT_X"]-5, player_image["PLAYER_PLACEMENT_Y"]-5, PLAYER_WIDTH+10, PLAYER_HEIGHT+10), border_radius = PLAYER_RADIUS) # Player background
-
             if player_image["PLAYING"]:
-                pg.draw.rect(screen, GRAY, (player_image["PLAYER_PLACEMENT_X"], player_image["PLAYER_PLACEMENT_Y"], PLAYER_WIDTH, PLAYER_HEIGHT), border_radius = PLAYER_RADIUS) # Player 
+                if not player_image["IS_BOT"]:
+                    pg.draw.rect(screen, GRAY, (player_image["PLAYER_PLACEMENT_X"], player_image["PLAYER_PLACEMENT_Y"], PLAYER_WIDTH, PLAYER_HEIGHT), border_radius = PLAYER_RADIUS) # Player 
+                else:
+                    pg.draw.rect(screen, BLUE, (player_image["PLAYER_PLACEMENT_X"], player_image["PLAYER_PLACEMENT_Y"], PLAYER_WIDTH, PLAYER_HEIGHT), border_radius = PLAYER_RADIUS) # BOT 
             elif not player_image["PLAYING"]:
                 pg.draw.rect(screen, DARK_RED, (player_image["PLAYER_PLACEMENT_X"], player_image["PLAYER_PLACEMENT_Y"], PLAYER_WIDTH, PLAYER_HEIGHT), border_radius = PLAYER_RADIUS)
 
             wallet_text = self.money_font.render("WALLET: $" + str(player_image["CASH"]), True, GOLD)
-
             bet_text = ""
-
             if player_image["PLAYING"] == False:
                 bet_text = self.money_font.render("out", True, BLACK)
             elif player_image["FOLDED"] == True:
@@ -1133,7 +1142,7 @@ class PygameUI:
             if hc.phase != GamePhase.SHOWDOWN:
 
                 if player_image["PLAYING"]:
-                    if player_image["ID"] == hc.betting_round.current_index:
+                    if player_image["ID"] == hc.betting_round.current_index and not player_image["IS_BOT"]: # Check that player isn't a bot
                         screen.blit(player_image["HAND"][1][1], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
                         screen.blit(player_image["HAND"][0][1], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
 
@@ -1141,65 +1150,79 @@ class PygameUI:
                         if (hc.phase == GamePhase.FLOP and self.first_flop == True) or (hc.phase == GamePhase.TURN and self.first_turn == True):    
                             try:
                                 large_hand_prob = player_image["PROBS"][0]
-                                large_hand_prob_text = self.player_font.render(f"{large_hand_prob["HAND"]} PROBABILITY %{round(large_hand_prob["PROBABILITY"]*100,2)}", True, GREEN)
+                                large_hand_prob_text = self.player_font.render(f"{large_hand_prob['HAND']} PROBABILITY %{round(large_hand_prob['PROBABILITY']*100,2)}", True, GREEN)
                                 screen.blit(large_hand_prob_text, (WINDOW_WIDTH-300, 10))
                             except Exception as e:
                                 pass
                             try:
-                                moderate_hand_prob = player_image["PROBS"][1]
-                                moderate_hand_prob_text = self.player_font.render(f"{moderate_hand_prob["HAND"]} PROBABILITY %{round(moderate_hand_prob["PROBABILITY"]*100)}", True, GOLD)
+                                moderate_hand_prob = player_image['PROBS'][1]
+                                moderate_hand_prob_text = self.player_font.render(f"{moderate_hand_prob['HAND']} PROBABILITY %{round(moderate_hand_prob['PROBABILITY']*100)}", True, GOLD)
                                 screen.blit(moderate_hand_prob_text, (WINDOW_WIDTH-300, 25))
                             except Exception as e:
                                 pass
                             try:
-                                small_hand_prob = player_image["PROBS"][2]
-                                small_hand_prob_text = self.player_font.render(f"{small_hand_prob["HAND"]} PROBABILITY %{round(small_hand_prob["PROBABILITY"]*100)}", True, RED) 
+                                small_hand_prob = player_image['PROBS'][2]
+                                small_hand_prob_text = self.player_font.render(f"{small_hand_prob['HAND']} PROBABILITY %{round(small_hand_prob['PROBABILITY']*100)}", True, RED) 
                                 screen.blit(small_hand_prob_text, (WINDOW_WIDTH-300, 40))
                             except Exception as e:
                                 pass
+                    elif player_image["ID"] == hc.betting_round.current_index and player_image["IS_BOT"]: # Check that player is a bot
+
+                        index = hc.betting_round.current_index
+
+                        screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+                        screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+
+                        if not player_image["ALL_IN"]:
+                            action_string, bot_action = hc.table.players[index].bot.decide()
+                            hc.apply_action(bot_action)
+
+                        hc.table.players[index].bot._print_action_probs()
+                        
+                        for player in hc.table.players:
+                            if player.is_bot:
+                                player.bot.notify_action(action_string)
+
                     else:
                         screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
                         screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
 
-            elif hc.phase == GamePhase.SHOWDOWN:
+            elif hc.phase == GamePhase.SHOWDOWN and hc.muck == False:
+
+                for hold_player_image in self.hold_player_images:
+                    if (player_image["ID"] == hold_player_image["ID"] and player_image["MUCK"] == False):
+                        if hold_player_image["PLAYING"] and not hold_player_image["FOLDED"]:
+                            screen.blit(hold_player_image["HAND"][1][1], (hold_player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, hold_player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
+                            screen.blit(hold_player_image["HAND"][0][1], (hold_player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, hold_player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
 
                 for winner_image in self.hold_winner_images:
-
-                    if (player_image["ID"] == winner_image["ID"]):
-
+                    if (player_image["ID"] == winner_image["ID"] and winner_image["MUCK"] == False):
                         screen.blit(winner_image["HAND"][1][1], (winner_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, winner_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-                        
                         for card in hc.best_five_card_combo:
                             card_image = self.card_images[f"{card.id}.png"]
                             if card_image == winner_image["HAND"][1][1]:
                                 screen.blit(transparent_surface, (winner_image["PLAYER_PLACEMENT_X"]+1+cards_to_center_x, winner_image["PLAYER_PLACEMENT_Y"]+1+cards_to_center_y))
 
                         screen.blit(winner_image["HAND"][0][1], (winner_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, winner_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-
                         for card in hc.best_five_card_combo:
                             card_image = self.card_images[f"{card.id}.png"]
                             if card_image == winner_image["HAND"][0][1]:
                                 screen.blit(transparent_surface, (winner_image["PLAYER_PLACEMENT_X"]+1+40+cards_to_center_x, winner_image["PLAYER_PLACEMENT_Y"]+1+cards_to_center_y))
-
-                    else:
-                        if player_image["PLAYING"]:
-                            screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
-                            screen.blit(self.card_images["Back Red 1.png"], (player_image["PLAYER_PLACEMENT_X"]+40+cards_to_center_x, player_image["PLAYER_PLACEMENT_Y"]+cards_to_center_y))
 
         # Player HUD windown 
         # Check player is current player or SHOWDOWN
         # Handle None type is pre betting round
         # When enough user information is provided to log a player action
 
-        if hc.phase != GamePhase.SHOWDOWN: 
+        if hc.phase != GamePhase.SHOWDOWN and not self.player_images[hc.betting_round.current_index]["IS_BOT"]: 
 
             hud_player_image = self.player_images[hc.betting_round.current_index]
 
             pg.draw.rect(screen, DARK_GRAY, (HUD_WINDOW_PLACEMENT_X-5, HUD_WINDOW_PLACEMENT_Y-5, HUD_WINDOW_WIDTH+10, HUD_WINDOW_HEIGHT+10), border_radius = PLAYER_RADIUS) 
             pg.draw.rect(screen, GRAY, (HUD_WINDOW_PLACEMENT_X, HUD_WINDOW_PLACEMENT_Y, HUD_WINDOW_WIDTH, HUD_WINDOW_HEIGHT), border_radius = PLAYER_RADIUS)  
-            hud_window_header_text = self.hud_header_font.render(f"HAND {self.hand_counter} {phase_text}: PLAYER {hud_player_image["ID"]}", True, WHITE)
+            hud_window_header_text = self.hud_header_font.render(f"HAND {self.hand_counter} {phase_text}: PLAYER {hud_player_image['ID']}", True, WHITE)
             bet_text = self.player_font.render(f"CURRENT BET: ${float(hc.table.current_bet)}", True, BLACK)
-            wallet_size_text = self.player_font.render(f"CURRENT WALLET: ${float(hud_player_image["CASH"])}", True, BLACK)
+            wallet_size_text = self.player_font.render(f"CURRENT WALLET: ${float(hud_player_image['CASH'])}", True, BLACK)
             screen.blit(hud_window_header_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+110))
             screen.blit(bet_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+225))
             screen.blit(wallet_size_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+260))
@@ -1225,26 +1248,26 @@ class PygameUI:
 
             #get_winning_five_card
             increment = 0
-            for card in hc.best_five_card_combo:
-                card_image = self.card_images[f"{card.id}.png"]
+            if hc.muck == False:
+                for card in hc.best_five_card_combo:
+                    card_image = self.card_images[f"{card.id}.png"]
 
-                rect_x = (HUD_WINDOW_PLACEMENT_X+HUD_WINDOW_WIDTH/2) + increment * (CARD_WIDTH/3)
-                rect_y = (HUD_WINDOW_PLACEMENT_Y+HUD_WINDOW_HEIGHT-HUD_WINDOW_HEIGHT/2 + CARD_HEIGHT/4)
+                    rect_x = (HUD_WINDOW_PLACEMENT_X+HUD_WINDOW_WIDTH/2) + increment * (CARD_WIDTH/3)
+                    rect_y = (HUD_WINDOW_PLACEMENT_Y+HUD_WINDOW_HEIGHT-HUD_WINDOW_HEIGHT/2 + CARD_HEIGHT/4)
 
-                new_size = (CARD_WIDTH/2, CARD_HEIGHT/2)
+                    new_size = (CARD_WIDTH/2, CARD_HEIGHT/2)
 
-                # Scale the image
-                scaled_image = pg.transform.scale(card_image, new_size) #new_size
+                    # Scale the image
+                    scaled_image = pg.transform.scale(card_image, new_size) #new_size
 
-                screen.blit(scaled_image, (rect_x, rect_y))
-                increment+=1
+                    screen.blit(scaled_image, (rect_x, rect_y))
+                    increment+=1
 
             winning_players = "WINNERS: "
             for winner in hc.winning_players:
                 winning_players = winning_players + f"PLAYER {winner.id} "
 
             pot_share = 0
-
             for pot in hc.winners_pots:
                 for winner in pot['winners']:
                     if winner.id == player_image['ID']:
@@ -1253,7 +1276,11 @@ class PygameUI:
             hud_window_header_text = self.hud_header_font.render(f"HAND {self.hand_counter}: {phase_text}", True, WHITE)
             winning_players_text = self.player_font.render(winning_players, True, BLACK)
             pot_share_text = self.player_font.render(f"POT SHARE: ${pot_share}", True, BLACK)
-            best_hand_name_text = self.player_font.render(f"HAND: {hc.best_hand_name}", True, BLACK)
+
+            if hc.muck == False:
+                best_hand_name_text = self.player_font.render(f"HAND: {hc.best_hand_name}", True, BLACK)
+            else:
+                best_hand_name_text = self.player_font.render("MUCK", True, BLACK)
 
             screen.blit(hud_window_header_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y+110))
             screen.blit(winning_players_text, (HUD_WINDOW_PLACEMENT_X+20, HUD_WINDOW_PLACEMENT_Y + HUD_WINDOW_HEIGHT/2))
@@ -1278,10 +1305,10 @@ class PygameUI:
         cash = f"${winner.cash:,.2f}"
         pot_share = f"${winner.largest_potshare:,.2f}"
 
-        header_text = self.header_font.render(f"GAME OVER", True, WHITE)
-        header_winnner_text = self.header_font.render(f"WINNER: PLAYER {winner.id}", True, WHITE)
-        number_of_hands_text = self.header_font.render(f"TOTAL NUMBER OF HANDS: {self.hand_counter-1}", True, WHITE)
-        best_five_card_text = self.header_font.render("BEST FIVE CARD HAND", True, WHITE) 
+        header_text = self.hud_header_font.render(f"GAME OVER", True, WHITE)
+        header_winnner_text = self.hud_header_font.render(f"WINNER: PLAYER {winner.id}", True, WHITE)
+        number_of_hands_text = self.hud_header_font.render(f"TOTAL NUMBER OF HANDS: {self.hand_counter-1}", True, WHITE)
+        best_five_card_text = self.hud_header_font.render("BEST FIVE CARD HAND", True, WHITE) 
         
         screen.blit(header_text, (GAME_OVER_PLACEMENT_X+20, GAME_OVER_PLACEMENT_Y+40))
         screen.blit(header_winnner_text, (GAME_OVER_PLACEMENT_X+20, GAME_OVER_PLACEMENT_Y+70))
@@ -1317,6 +1344,7 @@ class PygameUI:
             pot_text = self.pot_font.render("WINNER CASH " + cash, True, GOLD) # Anti-alias=True
             screen.blit(pot_text, (GAME_OVER_PLACEMENT_X+20, INPUT_WINDOW_PLACEMENT_Y+100 + 25))
 
+        # Draw pot share
         for stack in pot_share_image:
             for i in range(stack[0][1]):
                 height_buffer = FLAT_CHIP_HEIGHT/2
@@ -1324,7 +1352,7 @@ class PygameUI:
             pot_width+=1
 
             pot_share_text = self.pot_font.render("LARGEST POTSHARE " + pot_share, True, GOLD) # Anti-alias=True
-            screen.blit(pot_share_text, (GAME_OVER_PLACEMENT_X + GAME_OVER_WIDTH/2 + 2*FLAT_CHIP_WIDTH, INPUT_WINDOW_PLACEMENT_Y+100 + 25))
+            screen.blit(pot_share_text, (GAME_OVER_PLACEMENT_X + GAME_OVER_WIDTH/2, INPUT_WINDOW_PLACEMENT_Y+100 + 25))
 
         # Draw axes
         pg.draw.line(screen, WHITE, (GRAPH_START_X, GRAPH_START_Y), (GRAPH_START_X, GRAPH_START_Y - GRAPH_HEIGHT), 2) # Y-axis
@@ -1381,6 +1409,8 @@ class PygameUI:
 
         handevaluator = HandEvaluator()
         hc = HandController(self.table, handevaluator)
+
+        hc.init_bots(hc.table.num_players) # New
         hc.start_hand()
 
         # renders game window input

@@ -1,0 +1,44 @@
+{
+    "variant": "NT",
+    "ante_trimming_status": "false",
+    "antes": [
+        0,
+        0
+    ],
+    "blinds_or_straddles": [
+        5.0,
+        10
+    ],
+    "min_bet": 10,
+    "starting_stacks": [
+        200,
+        200
+    ],
+    "actions": [
+        "d dh p0 C9C10",
+        "d dh p1 SAC7",
+        "p0 cbr 0",
+        "d db DAH5S6",
+        "p0 cbr 0",
+        "p1 cbr 0",
+        "d db D3",
+        "p0 cbr 0",
+        "p1 cbr 0",
+        "d db D7",
+        "p0 cbr 0",
+        "p1 cbr 0"
+    ],
+    "hand": 1,
+    "seats": [
+        0,
+        1
+    ],
+    "players": [
+        "0",
+        "1"
+    ],
+    "finishing_stacks": [
+        190.0,
+        210.0
+    ]
+}

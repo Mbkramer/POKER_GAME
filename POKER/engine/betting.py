@@ -4,6 +4,7 @@ from typing import List, Dict
 from core.player import Player
 from core.player_action import PlayerAction, ActionType
 from core.table_state import TableState
+from bots.cfr_bots.neural.state_encoder import get_profile
 
 class BettingRound:
     """
@@ -55,6 +56,7 @@ class BettingRound:
 
             case ActionType.RAISE:
                 self._raise(player, action.raise_amount)
+                self.table.n_raises+=1
                 self.last_raiser_index = action.player_index
 
             case _:
@@ -105,6 +107,7 @@ class BettingRound:
         # Chips actually committed
         put_in = raise_to - player.bet
         posted = player.place_bet(put_in)
+        player.all_in = is_all_in
         self.table.pot += posted
 
         # Update betting state

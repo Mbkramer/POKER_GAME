@@ -126,9 +126,6 @@ class HandController:
             "players": [0] * self.table.num_players,
             "finishing_stacks": [0] * self.table.num_players
         }
-
-        print(self.table.small_blind)
-        print(self.table.big_blind)
         
         phh['blinds_or_straddles'][self.table.small_blind] = self.table.buy_in/2
         phh['blinds_or_straddles'][self.table.big_blind] = self.table.buy_in
@@ -195,20 +192,25 @@ class HandController:
 
         "d dh pN <card><card>"
 
-        player_deals = [""] * self.table.num_players_playing
+        player_deals = [""] * self.table.num_players
 
         for i in range(2):
             for p in self.table.players:
                 p.muck = False
+
                 if i == 0 and p.playing:
                     player_deals[p.id] = f"d dh p{p.id} "
+                elif i == 0 and not p.playing:
+                    continue
+
                 if len(p.hand) < 2 and p.playing:
                     card = self.deck.deal()
                     player_deals[p.id]+=str(card.id)
                     p.deal(card)
         
         for deal in player_deals:
-            self.phh['actions'].append(deal)
+            if deal != "":
+                self.phh['actions'].append(deal)
         
 
     def reset_round(self):
@@ -225,6 +227,7 @@ class HandController:
                 if player.cash <= 0:
                     player.playing = False
                     self.table.num_players_playing-=1
+                    
 
                 player.hand_value = 0
                 player.bet = 0

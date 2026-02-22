@@ -42,6 +42,7 @@ MAX_PLAYERS = 6
 arcade_classic_font_path = 'GAME_IMAGES/TABLE/ARCADECLASSIC.TTF'
 maestro_font_path = 'GAME_IMAGES/TABLE/Maesto-Regular_demo.otf'
 jmh_font_path = 'GAME_IMAGES/TABLE/JMH Cthulhumbus Arcade.otf'
+bit_font_path = 'GAME_IMAGES/TABLE/8bitOperatorPlusSC-Bold.ttf'
 
 POT_FONT = "monaco"
 MONEY_FONT = "monaco"
@@ -242,7 +243,7 @@ class Button:
         self.hover_color = hover_color
         self.background_rect = pg.Rect(x-3, y-3, width+6, height+6, border_radius=8)
         self.rect = pg.Rect(x, y, width, height, border_radius=8)
-        self.font = pg.font.SysFont(INPUT_FONT, 12)
+        self.font = pg.font.SysFont(INPUT_FONT, 15)
         self.rendered_text = self.font.render(text, True, BLACK) # Black text
 
     def draw_start_button(self, screen):
@@ -714,8 +715,8 @@ def draw_hud_buttons():
 
 def draw_input_boxes(input_font):
 
-    bet_input_box = InputBox(INPUT_WINDOW_PLACEMENT_X+INPUT_WINDOW_WIDTH/2+INPUT_BOX_WIDTH/4, INPUT_WINDOW_PLACEMENT_Y+195, INPUT_BOX_WIDTH, INPUT_BOX_HEIGHT, input_font)
-    wallet_input_box = InputBox(INPUT_WINDOW_PLACEMENT_X+INPUT_WINDOW_WIDTH/2+INPUT_BOX_WIDTH/4, INPUT_WINDOW_PLACEMENT_Y+230, INPUT_BOX_WIDTH, INPUT_BOX_HEIGHT, input_font)
+    bet_input_box = InputBox(INPUT_WINDOW_PLACEMENT_X+INPUT_WINDOW_WIDTH/2+INPUT_BOX_WIDTH/2, INPUT_WINDOW_PLACEMENT_Y+195, INPUT_BOX_WIDTH, INPUT_BOX_HEIGHT, input_font)
+    wallet_input_box = InputBox(INPUT_WINDOW_PLACEMENT_X+INPUT_WINDOW_WIDTH/2+INPUT_BOX_WIDTH/2, INPUT_WINDOW_PLACEMENT_Y+230, INPUT_BOX_WIDTH, INPUT_BOX_HEIGHT, input_font)
 
     return bet_input_box, wallet_input_box
 
@@ -759,12 +760,12 @@ class PygameUI:
         
         self.clock = pg.time.Clock()
 
-        self.pot_font = pg.font.SysFont(POT_FONT, 20)
-        self.money_font = pg.font.SysFont(POT_FONT, 10)
-        self.player_font = pg.font.SysFont(PLAYER_FONT, 12)
+        self.pot_font = pg.font.SysFont(INPUT_FONT, 20)
+        self.money_font = pg.font.SysFont(INPUT_FONT, 12)
+        self.player_font = pg.font.SysFont(INPUT_FONT, 12)
         self.header_font = pg.font.Font(arcade_classic_font_path, 35)
-        self.hud_header_font = pg.font.SysFont(PLAYER_FONT, 20)
-        self.input_font = pg.font.SysFont(INPUT_FONT, 10)
+        self.hud_header_font = pg.font.SysFont(INPUT_FONT, 20)
+        self.input_font = pg.font.SysFont(INPUT_FONT, 12)
 
         #Background
         try:

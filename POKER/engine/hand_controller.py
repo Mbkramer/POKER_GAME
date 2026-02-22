@@ -17,12 +17,13 @@ from engine.game_state import GamePhase
 from bots.cfr_bots.neural.state_encoder import get_profile
 
 # store directory
-OUT_DIRETORY = 'data/live_play_policy_distribution'
+OUT_DIRETORY = 'data/live_play_phh_store'
 
 #Bot net paths
 TWO_PLAYER = 'POKER/bots/cfr_bots/checkpoints/best_2P_10B_200W.pt'
 FOUR_PLAYER = 'POKER/bots/cfr_bots/checkpoints/best_4P_10B_500W.pt'
 SIX_PLAYER = 'POKER/bots/cfr_bots/checkpoints/best_6P_10B_500W.pt'
+SIX_PLAYER_TOURNEY = 'POKER/bots/cfr_bots/checkpoints/best_6P_10000B_600000W.pt'
 
 class HandController:
     """
@@ -62,6 +63,8 @@ class HandController:
             bot_net_path = TWO_PLAYER
         elif num_players <= 4:
             bot_net_path = FOUR_PLAYER
+        elif num_players <= 6 and (self.table.buy_in >= 10000 and self.table.wallet>=500000):
+            bot_net_path = SIX_PLAYER_TOURNEY
         elif num_players <= 6:
             bot_net_path = SIX_PLAYER
         else:
@@ -189,8 +192,6 @@ class HandController:
         self.table.current_bet = self.table.buy_in
 
     def _deal_hole_cards(self) -> None:
-
-        "d dh pN <card><card>"
 
         player_deals = [""] * self.table.num_players
 

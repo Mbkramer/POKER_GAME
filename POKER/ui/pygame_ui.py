@@ -127,13 +127,13 @@ INPUT_BOX_WIDTH = 75
 INPUT_BOX_HEIGHT = 10
 
 #Players
-PLAYER_WIDTH = 125
+PLAYER_WIDTH = 150 # 125
 PLAYER_HEIGHT = 100
 PLAYER_RADIUS = 32
 PLAYER_COLOR = GRAY
 
-ELLIPSE_PLACEMENT_WIDTH = 900 #900
-ELLIPSE_PLACEMENT_HEIGHT = 500 #500
+ELLIPSE_PLACEMENT_WIDTH = 875 #900
+ELLIPSE_PLACEMENT_HEIGHT = 475 #500
 ELLIPSE_CENTER_X = WINDOW_CENTER_X - (PLAYER_WIDTH/2)
 ELLIPSE_CENTER_Y = WINDOW_CENTER_Y - (PLAYER_HEIGHT/2)
 ELLIPSE_PLACEMENT_X = ELLIPSE_CENTER_X - (ELLIPSE_PLACEMENT_WIDTH) / 2
@@ -229,7 +229,6 @@ class InputBox:
 
         # Blit the text
         screen.blit(self.txt_surface, (self.rect.x, self.rect.y))
-
 
 class Button:
     def __init__(self, text, x, y, width, height, color, hover_color):
@@ -1138,7 +1137,7 @@ class PygameUI:
                 if player_image["PLAYER_PLACEMENT_X"] > 500:
                     cards_to_center_x -= CARD_WIDTH
                 if player_image["PLAYER_PLACEMENT_X"] < 500:
-                    cards_to_center_x += CARD_WIDTH*.75
+                    cards_to_center_x += CARD_WIDTH #*.75
 
             if hc.phase != GamePhase.SHOWDOWN:
 

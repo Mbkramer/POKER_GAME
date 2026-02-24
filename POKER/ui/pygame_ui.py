@@ -872,7 +872,7 @@ class PygameUI:
             
             if self.log_button.active:
 
-                if self.hold_player_action == "RAISE" and self.raise_input_box.stored_input >= hc.table.current_bet*2:
+                if self.hold_player_action == "RAISE" and self.raise_input_box.stored_input >= min(hc.table.current_bet + hc.table.last_raise_size, hc.table.players[hc.betting_round.current_index].cash):
                     self._send_action(hc, self.hold_player_action, self.raise_input_box.stored_input)
                     self.hold_player_action = ""
                     self.raise_input_box.text = ""
@@ -1150,19 +1150,19 @@ class PygameUI:
                         if (hc.phase == GamePhase.FLOP and self.first_flop == True) or (hc.phase == GamePhase.TURN and self.first_turn == True):    
                             try:
                                 large_hand_prob = player_image["PROBS"][0]
-                                large_hand_prob_text = self.player_font.render(f"{large_hand_prob['HAND']} PROBABILITY %{round(large_hand_prob['PROBABILITY']*100,2)}", True, GREEN)
+                                large_hand_prob_text = self.player_font.render(f"{large_hand_prob['HAND']} PROBABILITY {round(large_hand_prob['PROBABILITY']*100,2)}%", True, GREEN)
                                 screen.blit(large_hand_prob_text, (WINDOW_WIDTH-300, 10))
                             except Exception as e:
                                 pass
                             try:
                                 moderate_hand_prob = player_image['PROBS'][1]
-                                moderate_hand_prob_text = self.player_font.render(f"{moderate_hand_prob['HAND']} PROBABILITY %{round(moderate_hand_prob['PROBABILITY']*100)}", True, GOLD)
+                                moderate_hand_prob_text = self.player_font.render(f"{moderate_hand_prob['HAND']} PROBABILITY {round(moderate_hand_prob['PROBABILITY']*100)}%", True, GOLD)
                                 screen.blit(moderate_hand_prob_text, (WINDOW_WIDTH-300, 25))
                             except Exception as e:
                                 pass
                             try:
                                 small_hand_prob = player_image['PROBS'][2]
-                                small_hand_prob_text = self.player_font.render(f"{small_hand_prob['HAND']} PROBABILITY %{round(small_hand_prob['PROBABILITY']*100)}", True, RED) 
+                                small_hand_prob_text = self.player_font.render(f"{small_hand_prob['HAND']} PROBABILITY {round(small_hand_prob['PROBABILITY']*100)}%", True, RED) 
                                 screen.blit(small_hand_prob_text, (WINDOW_WIDTH-300, 40))
                             except Exception as e:
                                 pass

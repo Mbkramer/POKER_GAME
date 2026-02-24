@@ -2,8 +2,8 @@ Intelligent Poker Engine
 
 A modular, extensible poker game built in Python with a long‑term vision: create believable, intelligent opponents that play, learn, and adapt like real humans at the table.
 This project blends game engine architecture, probability modeling, decision theory, and AI‑driven behavior to simulate authentic poker gameplay rather than simple scripted bots.
-The current verison uses MCCFR to train 4 poker bot variants. PLay ranges from 2 Player, 10 But-in, 100 Wallet to tournament style 6 Player, 10000 Buy-in, 600000 Wallet. 
-Each bot is trained by collecting data from the current table state and preflop hand equities, post flop hand equity and dynamic play metrics, and by tracking openent play metrics.
+The current verison uses MCCFR to train 4 poker bot variants. Play ranges from 2 Player, 10 Buy-in, 100 Wallet to tournament style 6 Player, 10000 Buy-in, 600000 Wallet. 
+Each bot is trained by collecting data from the current table state and preflop hand equities, post flop hand equity and dynamic play metrics, and by tracking openent play metrics to self train on a large set of predetermined hands. Within the model, decisions are analysed by agregating "regret" or similarly the oppurtunity cost of taking another action given a certain game circumstance. These decisions and regrets are aggregated accross a vast collection of different hands, and from which are used to determine a nash equilibirum and optimal game strategy. 
 
 Primary objective:
 Build a complete poker environment where opponents reason under uncertainty, adapt to player behavior, and evolve strategically over time.

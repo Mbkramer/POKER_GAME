@@ -19,7 +19,7 @@ from engine.game_state import GamePhase
 
 from bots.cfr_bots.neural.cfr_net import CFRNet
 from bots.cfr_bots.cfr.preflop_abstraction import hand_to_bucket as _cfr_hand_to_bucket
-from bots.cfr_bots.neural.state_encoder import encode_state, mask_logits, N_FEATURES, N_ACTIONS, ALL_ACTIONS
+from bots.cfr_bots.neural.range_equity_state_encoder import encode_state, mask_logits, N_FEATURES, N_ACTIONS, ALL_ACTIONS
 
 # ── Hand bucket mapping ───────────────────────────────────────────────────────
 _ENGINE_TO_CFR_RANK = {
@@ -56,11 +56,10 @@ class EngineStateProxy:
         self.stacks = [p.cash for p in table.players]
         self.bets = [p.bet for p in table.players]
         self.n_raises = n_raises
-        self.folded = {p.id for p in table.players if p.folded}
+        self.folded = {i for i, p in enumerate(table.players) if p.folded}
         self.action_history = action_history
         self.street = _PHASE_TO_STREET.get(phase, 0)
         self.community_cards = list(table.community_cards)
-
 
 # ── Hybrid Bot ─────────────────────────────────────────────────────────────────
 class HybridPokerBot:

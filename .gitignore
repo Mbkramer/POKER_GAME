@@ -1,8 +1,35 @@
+.gitignore
 MISC/
 NOTES/
 PAST_GAME_DATA/
+venv/
+*.pt
+
+# Bots
+data/live_play_policy_distribution
+POKER/bots/cfr_bots/cfr/cfrm.py
+POKER/bots/cfr_bots/cfr/constants.py
+POKER/bots/cfr_bots/cfr/utils.py
+POKER/bots/bc_bot
+POKER/bots/cfr_bots/neural/cfr_neural_bot_eval.py
+POKER/bots/game_bots/game_neural_bot.py
+POKER/bots/cfr_bots/checkpoints
+POKER/bots/cfr_bots/checkpoints/cfr_state_6P_10B_500W_80165f2e.pkl
+POKER/bots/cfr_bots/checkpoints/cfr_state_4P_10B_500W_27509a5f.pkl
+POKER/bots/cfr_bots/checkpoints/cfr_state_2P_10B_200W_7b765d36.pkl
+POKER/bots/cfr_bots/checkpoints/best_6P_10B_500W.txt
+POKER/bots/cfr_bots/checkpoints/best_4P_10B_500W.txt
+POKER/bots/cfr_bots/checkpoints/best_2P_10B_200W.txt
+
+# Data
 data/
-POKER/bots
+data/five_card_hands
+data/live_play_policy_distribution/6P10B500W_T:2026-02-20_22:55:15
+data/phh_format_no_limit_data
+data/__init__.py
+data/schedule_fetch.py
+data/phh_nt_parser.py
+data/fetch.py
 
 code.txt
 PAST_GAME_DATA/

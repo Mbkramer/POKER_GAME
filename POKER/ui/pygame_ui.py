@@ -590,7 +590,7 @@ def draw_pot(pot, chip_images):
 
     return pot_image
 
-def draw_player_images(hc, table, card_images, chip_images):
+def draw_player_images(table, card_images, chip_images):
 
     player_images = []
 
@@ -971,7 +971,7 @@ class PygameUI:
             self.game_running=False
 
         self.pot_image = draw_pot(hc.table.pot, self.chip_images)
-        self.player_images = draw_player_images(hc.phase, hc.table, self.card_images, self.chip_images)
+        self.player_images = draw_player_images(hc.table, self.card_images, self.chip_images)
 
         phase_text = ""
         transparent_surface = pg.Surface((CARD_WIDTH-2, CARD_HEIGHT-2), pg.SRCALPHA)
@@ -1013,7 +1013,7 @@ class PygameUI:
             screen.blit(self.card_images["Back Red 1.png"], (DEALER_PLACEMENT_X, DEALER_PLACEMENT_Y-1*deck_spread))
             deck_spread+=1
 
-        # Community cards
+        # Community Cards
         if len(hc.table.community_cards)>0:
             self.draw_community_cards(hc.table.community_cards)
             if len(self.com_deck) == 5:
@@ -1132,7 +1132,7 @@ class PygameUI:
                 cards_to_center_x -= CARD_WIDTH/2
             if player_image["PLAYER_PLACEMENT_X"] < 500:
                 cards_to_center_x = CARD_WIDTH
-            if player_image["PLAYER_PLACEMENT_Y"] > 440:
+            if player_image["PLAYER_PLACEMENT_Y"] > 420:
                 cards_to_center_y -= CARD_HEIGHT
                 if player_image["PLAYER_PLACEMENT_X"] > 500:
                     cards_to_center_x -= CARD_WIDTH
@@ -1176,8 +1176,6 @@ class PygameUI:
                         if not player_image["ALL_IN"]:
                             action_string, bot_action = hc.table.players[index].bot.decide()
                             hc.apply_action(bot_action)
-
-                        hc.table.players[index].bot._print_action_probs()
                         
                         for player in hc.table.players:
                             if player.is_bot:

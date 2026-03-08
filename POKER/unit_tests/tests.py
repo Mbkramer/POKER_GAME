@@ -468,6 +468,7 @@ class tests:
         print("- - - - - - - - - - - PREDICTION TESTS RESULTS - - - - - - - - - - - -\n")
         self.test_hand_prediction()
 
+        
         # Basic hand rankings
 #        - Royal flush detection (A♠ K♠ Q♠ J♠ 10♠) CHECK
 #        - Straight flush vs regular flush (ensure straight flush ranks higher)

@@ -37,6 +37,7 @@ class HandController:
         self.deck = Deck()
         self.phase = GamePhase.SETUP
         self.betting_round: BettingRound | None = None
+        self.hand_counter = 0
 
         self.winning_players = []
         self.final_community_cards = []
@@ -45,7 +46,6 @@ class HandController:
         self.winners_pots: List[Dict]
         self.muck = False
 
-        self.hand_counter = 0
         self.phh: Dict = {}
         self.store_path = ''
         self.init_phh_store()
@@ -70,11 +70,11 @@ class HandController:
         else:
             print(f"Error loading {num_players} player net path...\nDefault to 4 player")
         
-        player_index = random.randint(0, num_players-1)
+        #player_index = random.randint(0, num_players-1)
 
         for player in self.table.players:
-            if player.id == player_index:
-                continue
+            #if player.id == player_index:
+            #    continue
 
             agression = 1.5 
             player.is_bot = True
@@ -143,6 +143,18 @@ class HandController:
 
         self.phh = phh
 
+    def _remove_phh_store(self):
+        
+        try:
+            if os.path.exists(self.store_path):
+                for file in os.listdir(self.store_path):
+                    os.remove(os.path.join(self.store_path, file))
+                os.rmdir(self.store_path)
+                print(f"PHH store at {self.store_path} removed successfully.")
+            else:
+                print(f"No PHH store found at {self.store_path}.")
+        except Exception as e:
+            print(f"Error removing PHH store: {e}")
 
     # =========================
     # Hand setup
@@ -397,7 +409,19 @@ class HandController:
                 elif self.table.num_players_playing == 1:
                     self.phase = GamePhase.GAMEOVER
                     self.game_over()
-                    
+
+        com_deck_str = ""
+
+        for card in self.table.community_cards:
+            com_deck_str+=card.id+" "
+
+        for player in self.table.players:     
+            if player.is_bot and len(player.hand)==2:
+                print(f"BOT {player.id} HAND: {player.hand[0].id} {player.hand[1].id}")
+                print(f"{self.phase} COMMUNITY CARDS: " + com_deck_str)       
+                player.bot._print_action_probs()
+                print("\n")
+
         self._update_bots()
         self._start_betting_round()
 
@@ -456,17 +480,30 @@ class HandController:
             for pot in self.winners_pots:
                 for winner in pot['winners']:
                     if winner.id == player.id:
+ 
+                        # Handle phevaluator hand values
+                        if isinstance(pot['best_hand_value'], int):
+                            if pot['best_hand_value'] > player.best_hand_value:
+                                player.best_hand_value = pot['best_hand_value']
+                                player.best_hand = pot['best_five_card_combo']
+                            if pot['amount'] > player.largest_potshare:
+                                player.largest_potshare = pot['amount']
+                            if player.muck:
+                                self.muck = True
+                                self.phh['actions'].append(f"p{player.id} sm")
 
-                        if pot['best_hand_value'][0] > player.best_hand_value:
-                            player.best_hand_value = pot['best_hand_value'][0]
-                            player.best_hand = pot['best_five_card_combo']
+                        # Handle treys hand values
+                        else:
+                            if pot['best_hand_value'][0] > player.best_hand_value:
+                                player.best_hand_value = pot['best_hand_value'][0]
+                                player.best_hand = pot['best_five_card_combo']
 
-                        if pot['amount'] > player.largest_potshare:
-                            player.largest_potshare = pot['amount']
+                            if pot['amount'] > player.largest_potshare:
+                                player.largest_potshare = pot['amount']
 
-                        if player.muck:
-                            self.muck = True
-                            self.phh['actions'].append(f"p{player.id} sm")
+                            if player.muck:
+                                self.muck = True
+                                self.phh['actions'].append(f"p{player.id} sm")
 
                         player.rake(pot['amount'])
 

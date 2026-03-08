@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+ALL_ACTIONS = ["FOLD", "CALL", "RAISE_2", "RAISE_4", "ALLIN"]
 
 class ResidualBlock(nn.Module):
     def __init__(self, dim: int, dropout: float = 0.1):
@@ -75,8 +76,23 @@ class CFRNet(nn.Module):
         return self.policy_head(h), self.value_head(h).squeeze(-1)
 
     @torch.no_grad()
-    def predict(self, x: torch.Tensor):
+    def predict(self, x: torch.Tensor, legal_actions: list = None):
         """Returns (policy_probs, value) for inference."""
         self.eval()
         logits, value = self(x)
-        return F.softmax(logits, dim=-1), value
+        
+        if legal_actions is not None:
+            # Mask illegal actions before softmax
+            masked = torch.full_like(logits, float('-inf'))
+            for i, a in enumerate(ALL_ACTIONS):
+                if a in legal_actions:
+                    if logits.dim() == 1:
+                        masked[i] = logits[i]
+                    else:
+                        masked[:, i] = logits[:, i]
+            probs = F.softmax(masked, dim=-1)
+        else:
+            # Fallback: no masking (training or unknown legal actions)
+            probs = F.softmax(logits, dim=-1)
+        
+        return probs, value

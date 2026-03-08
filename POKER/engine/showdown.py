@@ -21,6 +21,7 @@ class Showdown():
         self.hand_evaluator = hand_evaluator
         self.winning_players = []
         self.best_hand_value = None
+        self.best_hand_name = None
         self.best_five_card_combo = []
         self.pot_share = 0
 
@@ -28,9 +29,16 @@ class Showdown():
 
         hand_rank = "HIGH"
 
-        if self.best_hand_value:
-            hand_rank = self.best_hand_value[0]
-        self.best_hand_name = HAND_RANK_NAMES[hand_rank].upper()
+        if self.best_hand_value is not None:
+            
+            # Handle phevaluator hand values
+            if isinstance(self.best_hand_value, int):
+                hand_rank = self.best_hand_value
+            else: # Handle treys hand values
+                print(f'BEST HAND VALUE: {self.best_hand_value}')
+                hand_rank = self.best_hand_value[0]
+                self.best_hand_name = HAND_RANK_NAMES[hand_rank].upper()
+        
 
     def find_winning_hands(self):
 

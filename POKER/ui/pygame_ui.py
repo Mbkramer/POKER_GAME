@@ -1211,7 +1211,6 @@ class PygameUI:
         # Check player is current player or SHOWDOWN
         # Handle None type is pre betting round
         # When enough user information is provided to log a player action
-
         if hc.phase != GamePhase.SHOWDOWN and not self.player_images[hc.betting_round.current_index]["IS_BOT"]: 
 
             hud_player_image = self.player_images[hc.betting_round.current_index]

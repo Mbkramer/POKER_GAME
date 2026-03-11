@@ -9,8 +9,6 @@ from core.deck import Deck
 from core.table_state import TableState
 from engine.game_state import GamePhase
 
-import pandas as pd
-import json 
 from pathlib import Path
 
 HAND_RANKS = {
@@ -49,122 +47,127 @@ HAND_RANK_NAMES = {
     HAND_RANKS["STRAIGHT_FLUSH"]: "Straight Flush"
 }
 
+@lru_cache(maxsize=16384) 
+def _evaluate_5_card_hand_cached(card_tuple):
+    """
+    Returns a flat tuple of ints for every hand type so that
+    Python's tuple > comparison works correctly in all cases.
+
+    Formats:
+        STRAIGHT_FLUSH : (9, high)
+        QUADS          : (8, quad_rank, kicker)
+        FULL_HOUSE     : (7, trips_rank, pair_rank)
+        FLUSH          : (6, c1, c2, c3, c4, c5)   -- cards high→low
+        STRAIGHT       : (5, high)
+        TRIPLES        : (4, trips_rank, k1, k2)
+        TWO_PAIR       : (3, high_pair, low_pair, kicker)
+        PAIR           : (2, pair_rank, k1, k2, k3)
+        HIGH           : (1, c1, c2, c3, c4, c5)   -- cards high→low
+    """
+
+    values = []
+    suits = []
+
+    for value, suit in card_tuple:
+        values.append(value)
+        suits.append(suit)
+
+    values.sort(reverse=True)
+    value_counter = Counter(values)
+
+    # Flush check
+    is_flush = len(set(suits)) == 1
+
+    # Straight check (Ace high or low)
+    unique_values = sorted(set(values), reverse=True)
+    is_straight = False
+    straight_high = 0
+
+    for i in range(len(unique_values) - 4):
+        if unique_values[i] - unique_values[i + 4] == 4:
+            is_straight = True
+            straight_high = unique_values[i]
+            break
+
+    if not is_straight:
+        if set([14, 2, 3, 4, 5]).issubset(unique_values):
+            is_straight = True
+            straight_high = 5
+
+    # Straight Flush
+    if is_straight and is_flush:
+        return (HAND_RANKS["STRAIGHT_FLUSH"], straight_high)
+
+    # Grouped values sorted by count desc, then rank desc
+    grouped_values = sorted(
+        value_counter.items(),
+        key=lambda x: (-x[1], -x[0])
+    )
+
+    # Four of a Kind
+    if grouped_values[0][1] == 4:
+        return (
+            HAND_RANKS["QUADS"],
+            grouped_values[0][0],
+            grouped_values[1][0]
+        )
+
+    # Full House
+    if grouped_values[0][1] == 3 and grouped_values[1][1] == 2:
+        return (
+            HAND_RANKS["FULL_HOUSE"],
+            grouped_values[0][0],
+            grouped_values[1][0]
+        )
+
+    # Flush — flat tuple of all 5 card values high→low
+    if is_flush:
+        return (HAND_RANKS["FLUSH"], values[0], values[1], values[2], values[3], values[4])
+
+    # Straight
+    if is_straight:
+        return (HAND_RANKS["STRAIGHT"], straight_high)
+
+    # Three of a Kind — two kickers
+    if grouped_values[0][1] == 3:
+        kickers = [gv[0] for gv in grouped_values[1:]]
+        return (
+            HAND_RANKS["TRIPLES"],
+            grouped_values[0][0],
+            kickers[0],
+            kickers[1]
+        )
+
+    # Two Pair
+    if grouped_values[0][1] == 2 and grouped_values[1][1] == 2:
+        high_pair = max(grouped_values[0][0], grouped_values[1][0])
+        low_pair  = min(grouped_values[0][0], grouped_values[1][0])
+        kicker    = grouped_values[2][0]
+        return (
+            HAND_RANKS["TWO_PAIR"],
+            high_pair,
+            low_pair,
+            kicker
+        )
+
+    # One Pair — three kickers
+    if grouped_values[0][1] == 2:
+        kickers = [gv[0] for gv in grouped_values[1:]]
+        return (
+            HAND_RANKS["PAIR"],
+            grouped_values[0][0],
+            kickers[0],
+            kickers[1],
+            kickers[2]
+        )
+
+    # High Card — flat tuple of all 5 card values high→low
+    return (HAND_RANKS["HIGH"], values[0], values[1], values[2], values[3], values[4])
+
 class HandEvaluator:
 
     def __init__(self):
         pass
-
-    @lru_cache(maxsize=16384) # 1MB
-    def _evaluate_5_card_hand_cached(self, card_tuple):
-
-        values = []
-        suits = []
-
-        for value, suit in card_tuple:
-            values.append(value)
-            suits.append(suit)
-
-        values.sort(reverse=True)
-        value_counter = Counter(values)
-
-        # Flush check
-        is_flush = False
-        for suit in suits:
-            if suit != suits[0]:
-                is_flush = False
-                break
-            elif suit == suits[0]:
-                is_flush = True
-
-        # Straight check (Ace high or low)
-        unique_values = sorted(set(values), reverse=True)
-        is_straight = False
-        straight_high = 0
-
-        for i in range(len(unique_values) - 4):
-            if unique_values[i] - unique_values[i + 4] == 4:
-                is_straight = True
-                straight_high = unique_values[i]
-                break
-
-        if not is_straight:
-            if set([14, 2, 3, 4, 5]).issubset(unique_values):
-                is_straight = True
-                straight_high = 5
-
-        # Straight Flush
-        if is_straight and is_flush:
-            return (HAND_RANKS["STRAIGHT_FLUSH"], straight_high)
-        
-        # Check Grouped Values 
-        grouped_values = sorted(
-            value_counter.items(),
-            key=lambda x: (-x[1], -x[0])
-        )
-
-        # Four of a Kind
-        if grouped_values[0][1] == 4:
-            return (
-                HAND_RANKS["QUADS"],
-                grouped_values[0][0],
-                grouped_values[1][0]
-            )
-
-        # Full House
-        if grouped_values[0][1] == 3 and grouped_values[1][1] == 2:
-            return (
-                HAND_RANKS["FULL_HOUSE"],
-                grouped_values[0][0],
-                grouped_values[1][0]
-            )
-
-        # Flush
-        if is_flush:
-            return (HAND_RANKS["FLUSH"], tuple(values))  # Convert to tuple for hashability
-
-        # Straight
-        if is_straight:
-            return (HAND_RANKS["STRAIGHT"], straight_high)
-
-        # Three of a Kind
-        if grouped_values[0][1] == 3:
-            kickers = []
-            for i in range(1, len(grouped_values)):
-                kickers.append(grouped_values[i][0])
-
-            return (
-                HAND_RANKS["TRIPLES"],
-                grouped_values[0][0],
-                tuple(kickers)  # Convert to tuple for hashability
-            )
-
-        # Two Pair
-        if grouped_values[0][1] == 2 and grouped_values[1][1] == 2:
-            high_pair = max(grouped_values[0][0], grouped_values[1][0])
-            low_pair = min(grouped_values[0][0], grouped_values[1][0])
-            kicker = grouped_values[2][0]
-
-            return (
-                HAND_RANKS["TWO_PAIR"],
-                high_pair,
-                low_pair,
-                kicker
-            )
-
-        # One Pair
-        if grouped_values[0][1] == 2:
-            kickers = []
-            for i in range(1, len(grouped_values)):
-                kickers.append(grouped_values[i][0])
-
-            return (
-                HAND_RANKS["PAIR"],
-                grouped_values[0][0],
-                tuple(kickers)  # Convert to tuple for hashability
-            )
-
-        # High Card
-        return (HAND_RANKS["HIGH"], tuple(values))  # Convert to tuple for hashability
 
     def evaluate_5_card_hand(self, cards: list[Card]):
 
@@ -173,13 +176,8 @@ class HandEvaluator:
             ((CARD_VALUE[card.value], card.suit) for card in cards),
             reverse=True
         ))
-        
-        result = self._evaluate_5_card_hand_cached(card_tuple)
-        
-        # Convert tuples back to lists for backward compatibility
-        if isinstance(result[-1], tuple) and len(result[-1]) > 1 and isinstance(result[-1][0], int):
-            # This is a list of kickers or values, convert back to list
-            return result[:-1] + (list(result[-1]),)
+
+        result = _evaluate_5_card_hand_cached(card_tuple)
         return result
     
     def evaluate_7_card_hand(self, cards):

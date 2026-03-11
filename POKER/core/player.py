@@ -20,13 +20,13 @@ HAND_RANKS = {
 class Player:
 
     def __init__(self, id, cash, buy_in):
-        self.id = id
-        self.order = id
-        self.cash = cash
-        self.bet = 0
-        self.hand_bet = 0
+        self.id: int = id
+        self.order: int = id
+        self.cash: int = cash
+        self.bet: int = 0
+        self.hand_bet: int = 0
         self.hand = []
-        self.buy_in = buy_in
+        self.buy_in: int = buy_in
 
         # New bot 
         self.is_bot = False
@@ -38,11 +38,12 @@ class Player:
         self.playing = True
         self.touched = False
         self.muck = False
+        self.hand_value = None
+        self.five_card_combo = []
 
-        # End game stats
-        self.game_hand_value = None
-        self.game_best_hand: List[Card]
 
+        # Hand Probabilities
+        self.best_hand_probs = []
         self.hand_probabilities = {
             "HIGH": 0,
             "PAIR": 0,
@@ -54,11 +55,14 @@ class Player:
             "QUADS": 0,
             "STRAIGHT_FLUSH": 0
             }
+
         
-        self.best_hand_probs = []
+        # End game stats
+        self.game_hand_value = None
+        self.game_best_hand: List[Card] = []
 
         #end game stats
-        self.best_hand_value = 0
+        self.best_hand_value = None
         self.best_hand = []
         self.largest_potshare = 0
         self.cash_by_round = [cash]
@@ -75,7 +79,6 @@ class Player:
     def fold(self):
         self.folded = True
         self.bet = 0
-        self.hand_bet = 0
     
     def rake(self, pot_share):
         self.cash += pot_share
@@ -90,8 +93,13 @@ class Player:
         
         return hand_string
     
-    def assign_hand_value(self, value):
-        self.hand_value = value
+    def assign_hand(self, hand_value, five_card_combo):
+        self.hand_value = hand_value
+        self.five_card_combo = five_card_combo
+    
+    def assign_best_hand(self, best_hand_value, best_five_card_combo):
+        self.best_hand_value = best_hand_value
+        self.best_five_card_combo = best_five_card_combo
     
     def clear_hand(self):
         self.bet = 0
@@ -159,7 +167,7 @@ class Player:
         print(f"TRIPLES: {self.hand_probabilities['TRIPLES']}")
         print(f"STRAIGHT: {self.hand_probabilities['STRAIGHT']}")
         print(f"FLUSH: {self.hand_probabilities['FLUSH']}")
-        print(f"FULL_HOUSE: {self.hand_probabilities['FUSH']}")
+        print(f"FULL_HOUSE: {self.hand_probabilities['FULL_HOUSE']}")
         print(f"QUADS: {self.hand_probabilities['QUADS']}")
         print(f"STRAIGHT_FLUSH: {self.hand_probabilities['STRAIGHT_FLUSH']}\n")
     

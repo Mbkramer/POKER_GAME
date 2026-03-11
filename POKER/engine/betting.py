@@ -65,9 +65,6 @@ class BettingRound:
         self.table.players[action.player_index].touched = True
         self._check_complete()
 
-        if not self.active:
-            self._resolve_side_pots()
-
         if self.active:
             self._advance_turn()
 
@@ -115,6 +112,11 @@ class BettingRound:
             self.table.last_raise_size = raise_to - self.table.current_bet
             self.table.current_bet = raise_to
 
+        # update players to be visited 
+        for player in self.table.players:
+            if player.bet != self.table.current_bet and not player.folded and not player.all_in and player.playing:
+                player.touched = False
+
     def _advance_turn(self) -> None:
         """
         Advances to the next player who is able to act.
@@ -129,32 +131,45 @@ class BettingRound:
                 return
 
     def _check_complete(self) -> None:
-        """
-        Betting round is complete when:
-        - Only one active (non-folded) player remains, OR
-        - All active players have matched the current bet
-        """
-        active = []
-        check = 0
 
-        for player in self.table.players:
+        players = self.table.players
+        # Players still eligible to win the pot
+        live_players = [p for p in players if p.playing and not p.folded]
 
-            if (not player.folded) and (not player.all_in) and (player.playing):
-                if (player.bet < self.table.current_bet) or (not player.touched):
-                    active.append(player.id)
-
-            if player.folded or player.all_in or not player.playing:
-                check+=1
-
-        if len(active) < 1:
+        # 1) Fold terminal: only one player remains
+        if len(live_players) <= 1:
             self.active = False
+            self.table.end_hand = True
+            self.table.hand_end_reason = "fold"
+            self._resolve_side_pots()
+            return
 
-            # from equal to self.table.num_players
-            if check >= self.table.num_players-1:
-                self.table.end_hand = True
+        # Players who can still take betting actions
+        actionable_players = [p for p in live_players if not p.all_in]
 
-            return 
+        # 2) No one can act anymore: everyone left is all-in
+        if len(actionable_players) == 0:
+            self.active = False
+            self.table.end_hand = True
+            self.table.hand_end_reason = "all_in_runout"
+            self._resolve_side_pots()
+            return
+        
+        # 3) Betting round complete if every actionable player has:
+        #    - touched this round
+        #    - matched current bet
+        round_complete = all(
+            p.touched and p.bet == self.table.current_bet
+            for p in actionable_players
+        )
 
+        if round_complete:
+            self.active = False
+            self.table.hand_end_reason = "show_down"
+            self._resolve_side_pots()
+            return
+        
+        self._resolve_side_pots
         self.active = True
 
     # =========================
@@ -164,46 +179,40 @@ class BettingRound:
     def _resolve_side_pots(self) -> None:
 
         contributing_players = [
-            p for p in self.table.players 
-            if p.bet > 0 and p.playing
-        ]
-            
+            p for p in self.table.players
+            if p.hand_bet > 0 and p.playing and not p.folded # was if hand_bet > 0
+            ]
+
         if not contributing_players:
             return
-            
+
         self.pots = define_side_pots(contributing_players)
         self._get_side_pots()
-
+        
     def _get_side_pots(self) -> List[Dict]:
         self.table.pots = self.pots.copy()
-        
+
 # =========================
 # Define side pots
 # =========================
 
 def define_side_pots(players: List[Player]) -> List[Dict]:
-
     contributions = {
-        p: p.hand_bet  # Using new hand_bet between streets.. bet used to determine betting round eligibility
+        p: p.hand_bet
         for p in players
-        if p.hand_bet > 0 
+        if p.hand_bet > 0
     }
-
     pots: List[Dict] = []
 
     while contributions:
         min_bet = min(contributions.values())
         eligible = list(contributions.keys())
-
         pot_amount = min_bet * len(eligible)
-        pots.append({
-            "amount": pot_amount,
-            "eligible": eligible.copy()
-        })
+        pots.append({"amount": pot_amount, "eligible": eligible.copy()})
 
         for p in list(contributions.keys()):
             contributions[p] -= min_bet
             if contributions[p] == 0:
                 del contributions[p]
 
-    return pots
+    return pots  # ← plain list, no tuple

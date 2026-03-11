@@ -24,11 +24,12 @@ class TableState:
         self.deck: List[Card] = []
         
         self.pot = 0
-        self.live_money = 0
-        self.pots: List[Dict]
+        self.pots: List[Dict] = []
         self.current_bet = buy_in
+        self.live_money = 0
         self.last_raise_size = buy_in
         self.n_raises = 0
+        self.hand_end_reason = "None"
         
         self.dealer_index = 0
         self.small_blind = 0
@@ -42,6 +43,7 @@ class TableState:
     def reset_bets(self):
         for p in self.players:
             p.bet = 0
+            p.live_money = 0
     
     def print(self):
         print(f"num_players:{self.num_players}\n")

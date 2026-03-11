@@ -178,6 +178,27 @@ def _board_bucket(community) -> int:
     if high >= 9:  return 5
     return 6
 
+
+def _hand_strength_bucket(hole_cards, community, full_deck) -> int:
+    """
+    Postflop hand strength bucket (0=strongest, 11=weakest).
+
+    Uses postflop_equity_bucket() from preflop_abstraction — MC equity
+    vs a random opponent, result is cached by (hole_key, board_key) so
+    each unique (hand, board) pair is only computed once per training run.
+
+    Returns 6 (neutral mid-bucket) when hole_cards or community are absent
+    so the infoset key degrades gracefully on preflop nodes (where this is
+    never called) or in edge cases.
+    """
+    if not hole_cards or not community:
+        return 6
+    try:
+        from .preflop_abstraction import postflop_equity_bucket
+        return postflop_equity_bucket(hole_cards, community, full_deck)
+    except Exception:
+        return 6
+
 def _position_context(state, seat: int) -> str:
     if state.n_players == 2:
         bb = state.n_players - 1
@@ -363,7 +384,7 @@ class StreetChanceNode:
                     street=self.next_street, community_cards=new_community,
                     stacks=list(self.stacks), pot=self.pot,
                     bets=[0.0]*self.n_players, folded=set(self.folded),
-                    action_history=[], current_bet=0.0, last_raise_size=self.last_raise_size, n_raises=0.0,
+                    action_history=[], current_bet=0.0, last_raise_size=self.buyin, n_raises=0,
                     to_move=first,
                 )
 
@@ -385,7 +406,7 @@ class NLHGameState:
     _next_to_act can tell whether each player has acted this street.
     """
 
-    MAX_RAISES = 4
+    MAX_RAISES = 2
 
     def __init__(
         self,
@@ -464,6 +485,35 @@ class NLHGameState:
     def is_chance(self):    return False
     def chance_prob(self):  return 1.0
 
+    def _effective_stack_remaining(self) -> float:
+        live = [
+            self.stacks[p]
+            for p in range(self.n_players)
+            if p not in self.folded
+        ]
+        return min(live) if live else 0.0
+
+    def _pot_size_now(self) -> float:
+        return float(self.pot)
+
+    def _spr_now(self) -> float:
+        pot_now = max(self._pot_size_now(), 1.0)
+        eff = self._effective_stack_remaining()
+        return eff / pot_now
+
+    def _should_force_preflop_commit_resolution(self) -> bool:
+        if self.street != 0:
+            return False
+
+        live_players = [p for p in range(self.n_players) if p not in self.folded]
+        if len(live_players) != 2:
+            return False
+
+        if self.n_raises < 2:
+            return False
+
+        return self._spr_now() <= 1.5
+
     # ── Legal actions ─────────────────────────────────────────────────────────
 
     def _legal_actions(self):
@@ -483,42 +533,43 @@ class NLHGameState:
         acts.append(CALL)
 
         # Raise logic
-        if self.street == 0:
-            max_raises = 2
-        else:
-            max_raises = 4
-
+        max_raises = self.MAX_RAISES
         can_raise = self.n_raises < max_raises and stack > owed
 
         if can_raise:
-            # Minimum raise
             min_inc = max(self.last_raise_size, self.buyin)
             min_raise_to = self.current_bet + min_inc if self.current_bet > 0 else min_inc
             max_raise_to = self.bets[seat] + stack
 
-            # RAISE_2 / RAISE_4 only added if legal
-            r2_to = min_raise_to + min_inc
-            r4_to = min_raise_to + 3 * min_inc
-
-            # DEBUG
-            if r4_to <= max_raise_to and r2_to > max_raise_to:
-                print(f"  [BUG] RAISE_4 legal but RAISE_2 not: "
-                    f"r2_to={r2_to:.1f} r4_to={r4_to:.1f} "
-                    f"max={max_raise_to:.1f} cb={self.current_bet:.1f} "
-                    f"stack={stack:.1f} min_inc={min_inc:.1f}")
+            r2_to = min_raise_to
+            r4_to = min_raise_to + 2 * min_inc
 
             if r2_to <= max_raise_to:
                 acts.append(RAISE_2)
-            if r4_to <= max_raise_to:
+
+            if self.n_raises > 0 and r4_to <= max_raise_to:
                 acts.append(RAISE_4)
 
         # All-in always possible if player has chips
         # Not pre flop 'PRE' = 0
-        if stack > 0 and self.street!=0: 
-            acts.append(ALLIN)
+        if stack > 0:
+            allow_allin = False
+            if self.street == 0:
+                eff_bb = min(self.stacks) / max(self.buyin, 1.0)
+                commit_frac = self.bets[seat] / max(self.wallet, 1.0)
+                big_action = owed >= 2.5 * self.buyin
+
+                # Preflop jam only when clearly justified
+                if eff_bb <= 10:
+                    allow_allin = True
+                elif big_action and commit_frac >= 0.25:
+                    allow_allin = True
+            else:
+                allow_allin = True
+            if allow_allin:
+                acts.append(ALLIN)
 
         return acts
-
 
     # ── Child creation ────────────────────────────────────────────────────────
 
@@ -528,6 +579,29 @@ class NLHGameState:
         if action not in self._children_cache:
             self._children_cache[action] = self._make_child(action)
         return self._children_cache[action]
+    
+    def _advance_street(self, stacks, pot, bets, folded, next_street, all_in=False):
+        return StreetChanceNode(
+            parent=self,
+            next_street=next_street,
+            hands=self.hands,
+            hole_cards=self.hole_cards,
+            full_deck=self.full_deck,
+            pre_board=self.pre_board,
+            equity_p0=self.equity_p0,
+            wallet=self.wallet,
+            buyin=self.buyin,
+            n_players=self.n_players,
+            community_cards=self.community_cards,
+            stacks=stacks,
+            pot=pot,
+            folded=folded,
+            last_raise_size=self.buyin,
+            current_bet=0.0,
+            n_raises=0,
+            all_in_runout=all_in,
+        )
+    
 
     def _make_child(self, action):
         seat    = self.to_move
@@ -540,7 +614,6 @@ class NLHGameState:
         raises  = self.n_raises
         history = list(self.action_history) + [(seat, action)]
 
-        # ── Apply action ──────────────────────────────────────────────────
         if action == FOLD:
             folded.add(seat)
 
@@ -551,52 +624,66 @@ class NLHGameState:
             bets[seat]   += paid
             pot          += paid
 
-        # ── Raise 2x last raise
-        elif action == RAISE_2 or action == RAISE_4:
+        elif action in (RAISE_2, RAISE_4):
+            min_raise_size = max(lr, self.buyin)
+            min_raise_to   = cb + min_raise_size
+
             if action == RAISE_2:
-                multiplier = 2
-            elif action == RAISE_4:
-                multiplier = 4
+                # Smallest legal raise
+                target = min_raise_to
+            else:
+                # Larger raise tier
+                target = cb + 3 * min_raise_size
 
-            # Compute the minimum legal raise
-            min_raise_to = cb + max(lr, self.buyin)
-            target = cb + multiplier * max(lr, self.buyin)
-            target = max(target, min_raise_to)                     # enforce min raise
-            target = min(target, bets[seat] + stacks[seat])       # can't exceed stack
+            target = min(target, bets[seat] + stacks[seat])
 
-            inc = target - bets[seat]
 
-            if inc <= 0:
-                # Not enough to raise → treat as call
+            # If player cannot make a full legal raise, treat as a call/all-in-call.
+            if target < min_raise_to:
                 owed = max(cb - bets[seat], 0.0)
                 paid = min(owed, stacks[seat])
                 stacks[seat] -= paid
                 bets[seat]   += paid
                 pot          += paid
             else:
+                inc = target - bets[seat]
                 stacks[seat] -= inc
                 bets[seat]   += inc
                 pot          += inc
-                lr = inc
-                cb = bets[seat]
+
+                old_cb = cb
+                cb     = bets[seat]
+                lr     = cb - old_cb
                 raises += 1
 
-        # ── All-in
         elif action == ALLIN:
-            total = stacks[seat]
-            stacks[seat] = 0.0
-            bets[seat] += total
-            pot += total
+            total_commit = bets[seat] + stacks[seat]
 
-            if bets[seat] >= cb + max(lr, self.buyin):
-                lr = bets[seat] - cb
-                cb = bets[seat]
-                raises += 1
-            # else treat as call if below min raise — no raise increment
+            # Case 1: all-in does not exceed current bet -> it's just a call for less / call all-in
+            if total_commit <= cb:
+                paid = stacks[seat]
+                stacks[seat] = 0.0
+                bets[seat]  += paid
+                pot         += paid
 
-        # ── Determine continuation ────────────────────────────────────────
+            else:
+                raise_size      = total_commit - cb
+                min_raise_size  = max(lr, self.buyin)
 
-        next_seat = self._next_to_act(seat, folded, stacks, bets, cb, history)
+                paid = stacks[seat]
+                stacks[seat] = 0.0
+                bets[seat]   = total_commit
+                pot         += paid
+
+                # Only reopen betting if this is a full legal raise
+                if raise_size >= min_raise_size:
+                    old_cb = cb
+                    cb     = total_commit
+                    lr     = cb - old_cb
+                    raises += 1
+                # else: short all-in overcall; do not change current_bet / last_raise_size
+
+        next_seat = self._next_to_act(seat, folded, stacks, bets, cb, history, raises)
 
         if next_seat is not None:
             return NLHGameState(
@@ -606,13 +693,12 @@ class NLHGameState:
                 buyin=self.buyin, n_players=self.n_players,
                 street=self.street, community_cards=self.community_cards,
                 stacks=stacks, pot=pot, bets=bets, folded=folded,
-                action_history=history, current_bet=cb, 
+                action_history=history, current_bet=cb,
                 last_raise_size=lr, n_raises=raises, to_move=next_seat,
             )
 
         active = [i for i in range(self.n_players) if i not in folded]
 
-        # Only one player left -- terminal fold
         if len(active) == 1:
             return NLHGameState(
                 parent=self, hands=self.hands, hole_cards=self.hole_cards,
@@ -621,11 +707,10 @@ class NLHGameState:
                 buyin=self.buyin, n_players=self.n_players,
                 street=self.street, community_cards=self.community_cards,
                 stacks=stacks, pot=pot, bets=bets, folded=folded,
-                action_history=history, current_bet=0.0, 
+                action_history=history, current_bet=0.0,
                 last_raise_size=self.buyin, n_raises=0, to_move=None,
             )
 
-        # All active players are all-in -- run out the board
         all_allin = all(stacks[i] == 0 for i in active)
         if all_allin:
             next_street = self.street + 1
@@ -635,28 +720,22 @@ class NLHGameState:
                     full_deck=self.full_deck, pre_board=self.pre_board,
                     equity_p0=self.equity_p0, wallet=self.wallet,
                     buyin=self.buyin, n_players=self.n_players,
-                    street=3, community_cards=self.community_cards,
-                    stacks=stacks, pot=pot, bets=[0.0]*self.n_players,
-                    folded=folded, action_history=[], current_bet=0.0,
+                    street=self.street, community_cards=self.community_cards,
+                    stacks=stacks, pot=pot, bets=bets, folded=folded,
+                    action_history=history, current_bet=0.0,
                     last_raise_size=self.buyin, n_raises=0, to_move=None,
                 )
-            return StreetChanceNode(
-                parent=self, next_street=next_street, hands=self.hands,
-                hole_cards=self.hole_cards, full_deck=self.full_deck,
-                pre_board=self.pre_board, equity_p0=self.equity_p0,
-                wallet=self.wallet, buyin=self.buyin, n_players=self.n_players,
-                community_cards=self.community_cards, stacks=stacks, 
-                pot=pot, folded=folded, last_raise_size=lr, current_bet=cb,
-                n_raises=raises, all_in_runout=True,
+            return self._advance_street(
+                stacks=stacks, pot=pot, bets=bets, folded=folded,
+                next_street=next_street, all_in=True
             )
 
-        # Advance street
         next_street = self.street + 1
 
-        # Determine last raise for new street
-        cb = 0.0         # current bet starts at 0
-        raises = 0       # no raises yet on this street
-        lr = self.last_raise_size if self.last_raise_size > 0 else self.buyin
+        # New street starts with fresh betting state
+        cb = 0.0
+        raises = 0
+        lr = self.buyin
 
         if next_street > 3:
             return NLHGameState(
@@ -670,29 +749,14 @@ class NLHGameState:
                 last_raise_size=self.buyin, n_raises=0, to_move=None,
             )
 
-        return StreetChanceNode(
-            parent          = self,
-            next_street     = next_street,
-            hands           = self.hands,
-            hole_cards      = self.hole_cards,
-            full_deck       = self.full_deck,
-            pre_board       = self.pre_board,
-            equity_p0       = self.equity_p0,
-            wallet          = self.wallet,
-            buyin           = self.buyin,
-            n_players       = self.n_players,
-            community_cards = self.community_cards,
-            stacks          = stacks,
-            pot             = pot,
-            folded          = folded,
-            last_raise_size = lr,
-            current_bet     = cb,
-            n_raises       = raises,
+        return self._advance_street(
+            stacks=stacks, pot=pot, bets=bets, folded=folded,
+            next_street=next_street, all_in=False
         )
 
     # ── Next to act ───────────────────────────────────────────────────────────
 
-    def _next_to_act(self, last_seat, folded, stacks, bets, current_bet, history):
+    def _next_to_act(self, last_seat, folded, stacks, bets, current_bet, history, raises):
         active = [i for i in range(self.n_players) if i not in folded]
         if len(active) <= 1:
             return None
@@ -715,11 +779,15 @@ class NLHGameState:
                 return c
 
         # BB option: preflop, no raises, BB hasn't acted yet
-        if self.street == 0 and self.n_raises == 0:
+        if self.street == 0 and raises == 0:
             bb = self.n_players - 1
-            if (bb not in folded and stacks[bb] > 0
-                    and bets[bb] == current_bet and last_seat != bb
-                    and not any(s == bb for s, _ in self.action_history)):
+            if (
+                bb not in folded
+                and stacks[bb] > 0
+                and bets[bb] == current_bet
+                and last_seat != bb
+                and not any(s == bb for s, _ in history) 
+            ):
                 return bb
 
         return None
@@ -731,72 +799,76 @@ class NLHGameState:
             raise RuntimeError("evaluation() called on non-terminal state")
 
         active = [i for i in range(self.n_players) if i not in self.folded]
-
-        # Net gain = final stack - starting stack
-        # starting stack = wallet - amount contributed to pot
-        # amount contributed = wallet - current stack (since stacks are decremented as bets are made)
         contributed = [self.wallet - self.stacks[i] for i in range(self.n_players)]
 
+        # Fold terminal
         if len(active) == 1:
-            winner  = active[0]
+            winner = active[0]
             payoffs = [-contributed[i] for i in range(self.n_players)]
             payoffs[winner] += self.pot
             return payoffs
 
+        # Heads-up showdown
         if self.hole_cards is not None and len(active) == 2 and 0 in active:
             p1   = [i for i in active if i != 0][0]
             p0c  = self.hole_cards[0]
             p1c  = self.hole_cards[p1]
-            comm = self.community_cards
+            comm = list(self.community_cards)
 
+            payoffs = [-contributed[i] for i in range(self.n_players)]
+
+            # Exact river showdown
             if self.street == 3 and len(comm) == 5:
-                equity = _river_equity(p0c, p1c, comm)
-            elif self.pre_board is not None:
+                v0 = _eval7(list(p0c) + comm)
+                v1 = _eval7(list(p1c) + comm)
+
+                if v0 > v1:
+                    payoffs[0] += self.pot
+                elif v1 > v0:
+                    payoffs[p1] += self.pot
+                else:
+                    payoffs[0]  += self.pot / 2.0
+                    payoffs[p1] += self.pot / 2.0
+                return payoffs
+
+            # Unfinished board: equity approximation
+            if self.pre_board is not None:
                 equity = _mc_equity(p0c, p1c, comm, self.full_deck,
                                     pre_board=self.pre_board, n=100)
             else:
                 equity = _mc_equity(p0c, p1c, comm, self.full_deck, n=100)
 
-            p0_payoff = equity * self.pot - contributed[0]
-            p1_payoff = (1.0 - equity) * self.pot - contributed[p1]
-            payoffs   = [-contributed[i] for i in range(self.n_players)]
-            payoffs[0]  = p0_payoff
-            payoffs[p1] = p1_payoff
+            payoffs[0]  += equity * self.pot
+            payoffs[p1] += (1.0 - equity) * self.pot
             return payoffs
-        
-        # Case 3: multi-player showdown (3+ active) 
+
+        # Multiway showdown
         if self.hole_cards is not None and len(active) > 2:
-            comm = self.community_cards
-            # Use full 5-card board if available, else pre_board, else current community
+            comm = list(self.community_cards)
             if self.street == 3 and len(comm) == 5:
-                board = list(comm)
+                board = comm
             elif self.pre_board is not None:
                 board = list(self.pre_board[:5])
             else:
-                board = list(comm)  # may be incomplete; best effort
+                board = comm
 
-            # Evaluate every active player's best 7-card hand
             hand_vals = {}
             for idx in active:
                 cards = list(self.hole_cards[idx]) + board
                 hand_vals[idx] = _eval7(cards)
 
             best_val = max(hand_vals[idx] for idx in active)
-            winners  = [idx for idx in active if hand_vals[idx] == best_val]
+            winners = [idx for idx in active if hand_vals[idx] == best_val]
 
             payoffs = [-contributed[i] for i in range(self.n_players)]
-            share   = self.pot / len(winners)
+            share = self.pot / len(winners)
             for w in winners:
-                payoffs[w] += share  # winner recovers their contribution + share of pot
-            # Re-express as net gain from starting stack
-            for idx in active:
-                payoffs[idx] = payoffs[idx]   # already net (stack gain minus contributed)
+                payoffs[w] += share
             return payoffs
 
-        # Fallback
-        p0_payoff = self.equity_p0 * self.pot - contributed[0]
-        payoffs   = [-contributed[i] for i in range(self.n_players)]
-        payoffs[0] = p0_payoff
+        # Fallback approximation
+        payoffs = [-contributed[i] for i in range(self.n_players)]
+        payoffs[0] += self.equity_p0 * self.pot
         return payoffs
 
     # ── Info set / repr ───────────────────────────────────────────────────────
@@ -812,12 +884,18 @@ class NLHGameState:
         hist   = "_".join(f"{s}{a[0]}" for s, a in self.action_history)
 
         if self.street == 0 and seat is not None:
-            pf_ctx = _preflop_action_context(self)
-            pos_ctx = _position_context(self, seat)
+            pf_ctx    = _preflop_action_context(self)
+            pos_ctx   = _position_context(self, seat)
             depth_ctx = _effective_stack_bucket(self, seat)
             return f"{sname}.{hb}.{street}.{pf_ctx}.{pos_ctx}.{depth_ctx}.{hist}"
 
-        return f"{sname}.{hb}.{street}.{bb}.{hist}"
+        # Postflop: include hand strength bucket so CFR differentiates
+        # "trash hand on a paired board" from "top pair on a paired board".
+        # Without this, all hands with the same preflop bucket collapse into
+        # a single infoset regardless of how they connected with the board.
+        hole  = self.hole_cards[seat] if (self.hole_cards and seat is not None) else None
+        hsb   = _hand_strength_bucket(hole, self.community_cards, self.full_deck)
+        return f"{sname}.{street}.{bb}.{hsb}.{hist}" # Hand bucket removed from infoset for now to reduce size and focus equity
 
     def __repr__(self):
         seat = SEAT_NAMES.get(self.to_move, str(self.to_move))

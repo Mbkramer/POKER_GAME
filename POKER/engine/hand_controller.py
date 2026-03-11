@@ -14,7 +14,7 @@ from core.table_state import TableState
 from engine.betting import BettingRound
 from engine.showdown import Showdown
 from engine.game_state import GamePhase
-from bots.cfr_bots.neural.state_encoder import get_profile
+from bots.cfr_bots.neural.combined_state_encoder import get_profile
 
 # store directory
 OUT_DIRETORY = 'data/live_play_phh_store'
@@ -45,6 +45,7 @@ class HandController:
         self.best_five_card_combo = []
         self.winners_pots: List[Dict]
         self.muck = False
+        self.no_showdown = False
 
         self.phh: Dict = {}
         self.store_path = ''
@@ -70,11 +71,11 @@ class HandController:
         else:
             print(f"Error loading {num_players} player net path...\nDefault to 4 player")
         
-        #player_index = random.randint(0, num_players-1)
+        player_index = random.randint(0, num_players-1)
 
         for player in self.table.players:
-            #if player.id == player_index:
-            #    continue
+            if player.id == player_index:
+                continue
 
             agression = 1.5 
             player.is_bot = True
@@ -130,7 +131,7 @@ class HandController:
             "finishing_stacks": [0] * self.table.num_players
         }
         
-        phh['blinds_or_straddles'][self.table.small_blind] = self.table.buy_in/2
+        phh['blinds_or_straddles'][self.table.small_blind] = self.table.buy_in//2
         phh['blinds_or_straddles'][self.table.big_blind] = self.table.buy_in
 
         for player in self.table.players:
@@ -170,6 +171,8 @@ class HandController:
 
         self._deal_hole_cards()
         self.muck = False
+        self.no_showdown = False
+        self.table.hand_end_reason = "None"
 
         self.phase = GamePhase.PREFLOP
         
@@ -185,6 +188,13 @@ class HandController:
 
     def _post_blinds(self) -> None:
 
+        for player in self.table.players:
+            player.folded = False
+            player.all_in = False
+            player.touched = False
+            player.bet = 0
+            player.hand_bet = 0
+
         sb = (self.table.dealer_index) % len(self.table.players)
         bb = (self.table.dealer_index + 1)  % len(self.table.players)
 
@@ -196,10 +206,8 @@ class HandController:
         self.table.small_blind = sb
         self.table.big_blind = bb
 
-        self.table.pot += self.table.players[sb].place_bet(self.table.buy_in/2)
+        self.table.pot += self.table.players[sb].place_bet(self.table.buy_in//2)
         self.table.pot += self.table.players[bb].place_bet(self.table.buy_in)
-        self.table.players[bb].touched = True
-        self.table.players[sb].touched = False #From true
 
         self.table.current_bet = self.table.buy_in
 
@@ -264,12 +272,12 @@ class HandController:
             raise ValueError(f"Deck should have 52 cards. DECK LENGTH: {len(self.deck.cards)}")
         
         self.table.pot = 0
-        self.table.live_money = 0
         self.table.current_bet = 0
         self.last_raise_size = 0
         self.table.n_raises = 0
         self.table.end_hand = False
         self.pots: List[Dict] = []
+        self.table.live_money = 0
 
         # record hand
         for player in self.table.players:
@@ -350,23 +358,40 @@ class HandController:
             
             # C-bet tracking
             if self.phase == GamePhase.FLOP:
-                profile.record_cbet_faced(folded=action.action_type == ActionType.FOLD)
+                if action.action_type == ActionType.RAISE:
+                    # This player is cbetting
+                    get_profile(action.player_index).record_cbet_opp(fired=True)
+                elif action.action_type in (ActionType.FOLD, ActionType.CALL):
+                    # This player is facing a cbet
+                    if self.table.n_raises >= 1:  # only if there was actually a bet
+                        get_profile(action.player_index).record_cbet_faced(
+                            folded=action.action_type == ActionType.FOLD
+                        )
+
+        #execute game action in betting round
+        self.betting_round.apply(action)
 
         # store phh action
         if action.action_type == ActionType.FOLD:
             self.phh['actions'].append(f"p{action.player_index} f")
-        elif action.action_type == ActionType.CALL or ActionType.CHECK:
-            self.phh['actions'].append(f"p{action.player_index} cbr {action.raise_amount}") # Check
+        elif action.action_type in (ActionType.CALL, ActionType.CHECK):
+            self.phh['actions'].append(f"p{action.player_index} cc") # Check / Call
         elif action.action_type == ActionType.RAISE:
-            self.phh['actions'].append(f"p{action.player_index} cc")
-
-        #execute game action in betting round
-        self.betting_round.apply(action)
+            for player in self.table.players:
+                if player.id == action.player_index:
+                    self.phh['actions'].append(f"p{action.player_index} cbr {int(player.hand_bet)}") # Raise"
 
         if self.table.end_hand:
             self._end_betting_round()
             self._close_hand()
 
+        #bb = self.table.players[self.table.big_blind]
+        #if (self.phase == GamePhase.PREFLOP
+        #        and not bb.folded
+        #        and bb.bet == self.table.buy_in   # still sitting at blind
+        #        and self.table.n_raises == 0):    # no raise happened
+        #    self.phh['actions'].append(f"p{self.table.big_blind} cc")
+        
         if not self.betting_round.active:
             self._end_betting_round()
             self._advance_phase()
@@ -379,8 +404,40 @@ class HandController:
         
         self.table.reset_bets()
 
+        # ------- Review game play in terminal with bot action policy -------
+        com_deck_str = ""
+        for card in self.table.community_cards:
+            com_deck_str+=card.id+" "
+
+        for player in self.table.players: 
+            if player.is_bot and len(player.hand)==2:
+                print(f"BOT {player.id} HAND: {player.hand[0].id} {player.hand[1].id}  COMMUNITY CARDS: {com_deck_str}")    
+                player.bot._print_action_probs()
+                print("\n")
+            elif not player.is_bot and len(player.hand)==2:
+                print(f"PLAYER {player.id} HAND: {player.hand[0].id} {player.hand[1].id}  COMMUNITY CARDS: {com_deck_str}") 
+                print("\n")    
+
+        if self.phase == GamePhase.SHOWDOWN:
+            print(f"\nHAND {self.hand_counter} CLOSED - {self.table.hand_end_reason}")
+            i = 0
+            for pot in self.winners_pots:
+                for winner in pot['winners']:
+                    print(f"POT {i}: WINNER {winner.id} POT SHARE: {pot['amount']}")
+                i+=1
+            print("PHH style action ledger:")
+            for action in self.phh['actions']:
+                print(action)
+            print("\n")
+
+        # Advance game phase, deal community cards as needed, run monte carlo predictions at flop and turn
         match self.phase:
             case GamePhase.PREFLOP:
+
+                for player in self.table.players:
+                    if player.playing and not player.folded:
+                        get_profile(player.id).record_saw_flop()
+
                 self._deal_burn()
                 self._deal_community(3)
                 self.phase = GamePhase.FLOP
@@ -410,20 +467,9 @@ class HandController:
                     self.phase = GamePhase.GAMEOVER
                     self.game_over()
 
-        com_deck_str = ""
-
-        for card in self.table.community_cards:
-            com_deck_str+=card.id+" "
-
-        for player in self.table.players:     
-            if player.is_bot and len(player.hand)==2:
-                print(f"BOT {player.id} HAND: {player.hand[0].id} {player.hand[1].id}")
-                print(f"{self.phase} COMMUNITY CARDS: " + com_deck_str)       
-                player.bot._print_action_probs()
-                print("\n")
-
         self._update_bots()
-        self._start_betting_round()
+        if self.phase not in (GamePhase.SHOWDOWN, GamePhase.GAMEOVER):
+            self._start_betting_round()
 
     def _run_monte_carlo_predictions(self):
 
@@ -437,6 +483,14 @@ class HandController:
     #flash hand to showdown
     def _close_hand(self):
 
+        count = 0
+        for player in self.table.players:
+            if player.playing and not player.folded:
+                count+=1
+        
+        if count == 1:
+            self.no_showdown = True
+
         if self.phase == GamePhase.PREFLOP:
             self._deal_burn()
             self._deal_community(3)
@@ -444,14 +498,34 @@ class HandController:
             self._deal_community(1)
             self._deal_burn()
             self._deal_community(1)
+
+            if self.no_showdown:
+                for i in range(5):
+                    if self.phh['actions'] and self.phh['actions'][-1].startswith("d db "):
+                        self.phh['actions'].pop()
+                    else:
+                        break
+
         elif self.phase == GamePhase.FLOP:
             self._deal_burn()
             self._deal_community(1)
             self._deal_burn()
             self._deal_community(1)
+
+            if self.no_showdown:
+                for i in range(2):
+                    if self.phh['actions'] and self.phh['actions'][-1].startswith("d db "):
+                        self.phh['actions'].pop()
+                    else:
+                        break
+
         elif self.phase == GamePhase.TURN:
             self._deal_burn()
             self._deal_community(1)
+
+            if self.no_showdown:
+                if self.phh['actions'] and self.phh['actions'][-1].startswith("d db "):
+                    self.phh['actions'].pop()
 
         self.phase = GamePhase.RIVER
 
@@ -473,46 +547,27 @@ class HandController:
         self.best_five_card_combo = showdown.best_five_card_combo.copy()
         self.winners_pots = showdown.winners_pots.copy()
         self.best_hand_name = showdown.best_hand_name
-        
-        live_money_share = self.table.live_money / len(self.winning_players) #Share of folded money
 
         for player in self.table.players:
             for pot in self.winners_pots:
                 for winner in pot['winners']:
                     if winner.id == player.id:
- 
-                        # Handle phevaluator hand values
+                        if player.muck:
+                            self.muck = True
+
+                        # Handle phevaluator hand values from bot eval scripts
                         if isinstance(pot['best_hand_value'], int):
-                            if pot['best_hand_value'] > player.best_hand_value:
-                                player.best_hand_value = pot['best_hand_value']
-                                player.best_hand = pot['best_five_card_combo']
-                            if pot['amount'] > player.largest_potshare:
-                                player.largest_potshare = pot['amount']
-                            if player.muck:
-                                self.muck = True
-                                self.phh['actions'].append(f"p{player.id} sm")
-
-                        # Handle treys hand values
+                            continue
                         else:
-                            if pot['best_hand_value'][0] > player.best_hand_value:
-                                player.best_hand_value = pot['best_hand_value'][0]
-                                player.best_hand = pot['best_five_card_combo']
-
                             if pot['amount'] > player.largest_potshare:
                                 player.largest_potshare = pot['amount']
-
-                            if player.muck:
-                                self.muck = True
-                                self.phh['actions'].append(f"p{player.id} sm")
 
                         player.rake(pot['amount'])
 
-        if not self.muck:
+        # Only log sm entries for genuine showdowns
+        if not self.no_showdown and not self.muck:
             for player in self.table.players:
                 if player.playing and not player.folded:
                     self.phh['actions'].append(f"p{player.id} sm {player.hand[0].id}{player.hand[1].id}")
-
-        for player in self.winning_players:
-            player.rake(live_money_share)
 
         self.reset_round()

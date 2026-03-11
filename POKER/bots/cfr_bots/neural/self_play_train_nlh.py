@@ -54,7 +54,7 @@ from cfr_bots.cfr.preflop_abstraction import PreflopAbstraction
 
 from cfr_net import CFRNet
 #from state_encoder import encode_state, policy_tensor, N_FEATURES, N_ACTIONS, ALL_ACTIONS
-from range_equity_state_encoder import (
+from combined_state_encoder import (
     encode_state, policy_tensor, N_FEATURES, N_ACTIONS, ALL_ACTIONS,
     STREET_SLICE, IDX_HAND_STRENGTH
 )
@@ -167,7 +167,7 @@ class VanillaCFR(CounterfactualRegretMinimizationBase):
         # sampling correction needed since we're tracking actual strategy not utility
         for a in actions:
             self.cumulative_sigma[inf_set][a] += (
-                reaches[i] * self.sigma[inf_set][a]
+                cfr_reach * self.sigma[inf_set][a]
             )
 
         # ─────────────────────────────────────────────────────────────────
@@ -388,11 +388,43 @@ def train_net_on_samples(net, optimizer, samples, device, epochs=10,
 
     # ─────────────────────────────────────────────────────────────────────
 
-    # NEW 
     actual_batch = min(batch_size, len(train_samples))
-    dataset      = TensorDataset(features, policies, values_norm, legal_masks)
-    loader       = DataLoader(dataset, batch_size=max(actual_batch, 1),
-                            shuffle=True, drop_last=False)  # drop_last=False prevents losing the tail
+    dataset = TensorDataset(features, policies, values_norm, legal_masks)
+
+    street_ids = []
+    for s in train_samples:
+
+        feat = s[0]
+        street = feat[STREET_SLICE]
+        sid =  torch.argmax(street).item()
+        street_ids.append(sid)
+
+    street_counts = Counter(street_ids)
+
+    target_mix = {
+        0: 0.15,  # PRE
+        1: 0.40,  # FLP
+        2: 0.27,  # TRN
+        3: 0.18,  # RVR
+    }
+
+    sample_weights = torch.tensor(
+        [target_mix[sid] / max(street_counts[sid], 1) for sid in street_ids],
+        dtype=torch.double
+    )
+
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(train_samples),
+        replacement=True,
+    )
+
+    loader = DataLoader(
+        dataset,
+        batch_size=max(actual_batch, 1),
+        sampler=sampler,
+        drop_last=False,
+    )
 
     net.train()
     total_pol, total_val, n_batches = 0.0, 0.0, 0
@@ -752,17 +784,6 @@ def self_play_train(
         cfr.run(iterations=cfr_iterations, progress_interval=max(1, min(50, cfr_iterations // 10)))
         cfr.sample_collector = None
 
-        # TODO get rid
-        postflop_infosets = sum(
-            1 for k in cfr.cumulative_regrets.keys()
-            if 'FLP' in k or 'TRN' in k or 'RVR' in k
-        )
-        preflop_infosets = sum(
-            1 for k in cfr.cumulative_regrets.keys()
-            if 'PRE' in k
-        )
-        print(f"  [DIAG] CFR infosets: PRE={preflop_infosets} POSTFLOP={postflop_infosets}")
-
         cfr.compute_nash_equilibrium()
         game_value = cfr.value_of_the_game(n_samples=500)
 
@@ -824,8 +845,6 @@ def self_play_train(
             print(f"  [DIAG] Avg postflop hand strength fv[{IDX_HAND_STRENGTH}]: {avg_strength:.4f}")
             if avg_strength < 0.05:
                 print("  [DIAG] *** WARNING: hand strength near zero — phevaluator fallback likely ***")
-            elif avg_strength > 0.15:
-                print("  [DIAG] *** OK: hand strength looks reasonable ***")
 
         street_counts = {0: 0, 1: 0, 2: 0, 3: 0}
         for feat, pi, v, _ in new_samples:
@@ -846,25 +865,72 @@ def self_play_train(
         max_history_iters = (replay_window // max(len(new_samples), 1)) + 2
         iter_sample_history = iter_sample_history[-max_history_iters:]
 
-        # Build weighted accumulated samples with recency bias
-        accumulated_samples = []
+        # ------------------------------------------------------------------
+        # Street-balanced replay rebuild with recency bias
+        # Target mix is deliberate, not frequency-matching.
+        # ------------------------------------------------------------------
+        street_targets = {
+            0: 0.15,  # PRE
+            1: 0.40,  # FLP
+            2: 0.27,  # TRN
+            3: 0.18,  # RVR
+        }
+
+        street_quotas = {
+            s: int(replay_window * frac)
+            for s, frac in street_targets.items()
+        }
+
+        # Collect samples by street, preserving recency weighting across iterations
+        street_buckets = {0: [], 1: [], 2: [], 3: []}
+
         weighted_batches = []
         for i, batch in enumerate(iter_sample_history):
-            age = len(iter_sample_history) - i  # 1=newest, N=oldest
+            age = len(iter_sample_history) - i   # 1=newest, N=oldest
             weight = 1.0 / age
             weighted_batches.append((batch, weight))
 
-        # Sample from each batch proportional to weight until replay_window filled
-        total_weight = sum(w for _, w in weighted_batches)
-        accumulated_samples = []
         for batch, weight in reversed(weighted_batches):
-            proportion = weight / total_weight
-            n_samples = min(int(proportion * replay_window), len(batch))
-            accumulated_samples = list(batch[-n_samples:]) + accumulated_samples
+            for sample in batch:
+                feat = sample[0]
+                street = feat[STREET_SLICE].tolist()
+                s = street.index(max(street)) if max(street) > 0 else 0
+                street_buckets[s].append((sample, weight))
 
-        # Trim to replay_window just in case
+        accumulated_samples = []
+        for s in range(4):
+            bucket = street_buckets[s]
+            if not bucket:
+                continue
+
+            quota = street_quotas[s]
+
+            # Favor recent samples within each street bucket
+            weights = np.array([w for _, w in bucket], dtype=np.float64)
+            weights = weights / weights.sum()
+
+            take = min(quota, len(bucket))
+            idxs = np.random.choice(len(bucket), size=take, replace=False, p=weights)
+            accumulated_samples.extend(bucket[i][0] for i in idxs)
+
+        # Backfill if any street quota could not be met
+        if len(accumulated_samples) < replay_window:
+            all_samples = []
+            for batch, weight in reversed(weighted_batches):
+                for sample in batch:
+                    all_samples.append((sample, weight))
+
+            remaining = replay_window - len(accumulated_samples)
+            if all_samples:
+                weights = np.array([w for _, w in all_samples], dtype=np.float64)
+                weights = weights / weights.sum()
+                take = min(remaining, len(all_samples))
+                idxs = np.random.choice(len(all_samples), size=take, replace=False, p=weights)
+                accumulated_samples.extend(all_samples[i][0] for i in idxs)
+
+        # Final trim just in case
         if len(accumulated_samples) > replay_window:
-            accumulated_samples = accumulated_samples[-replay_window:]
+            accumulated_samples = accumulated_samples[:replay_window]
 
         # Adaptive epoch count — fewer epochs when buffer is large.
         target_grad_steps = net_epochs * (replay_window // 512)
@@ -872,10 +938,10 @@ def self_play_train(
         adaptive_epochs   = max(3, min(net_epochs, target_grad_steps // actual_batches))
 
         # Dynamic weight shifting based on previous iteration's val_loss
-        if val_loss < 0.10:
+        if val_loss < 0.15:
             policy_weight = 1.0
             value_weight  = 0.7
-        elif val_loss < 0.15:
+        elif val_loss < 0.25:
             policy_weight = 0.7
             value_weight  = 0.8
         else:

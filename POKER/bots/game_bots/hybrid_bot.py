@@ -19,7 +19,7 @@ from engine.game_state import GamePhase
 
 from bots.cfr_bots.neural.cfr_net import CFRNet
 from bots.cfr_bots.cfr.preflop_abstraction import hand_to_bucket as _cfr_hand_to_bucket
-from bots.cfr_bots.neural.range_equity_state_encoder import encode_state, mask_logits, N_FEATURES, N_ACTIONS, ALL_ACTIONS
+from bots.cfr_bots.neural.combined_state_encoder import encode_state, mask_logits, N_FEATURES, N_ACTIONS, ALL_ACTIONS
 
 # ── Hand bucket mapping ───────────────────────────────────────────────────────
 _ENGINE_TO_CFR_RANK = {
@@ -43,23 +43,40 @@ _PHASE_TO_STREET = {
     GamePhase.RIVER: 3,
 }
 
+MAX_RAISES = 2  
+
 class EngineStateProxy:
-    """Minimal proxy for state_encoder.encode_state()"""
+    """Minimal proxy for combined_state_encoder.encode_state()"""
     def __init__(self, table: TableState, phase: GamePhase, acting_seat: int,
                  n_raises: int, action_history: list, hand_buckets: list):
-        self.to_move = acting_seat
-        self.n_players = table.num_players
-        self.hands = hand_buckets
-        self.wallet = table.wallet
-        self.pot = table.pot
-        self.current_bet = table.current_bet
-        self.stacks = [p.cash for p in table.players]
-        self.bets = [p.bet for p in table.players]
-        self.n_raises = n_raises
-        self.folded = {i for i, p in enumerate(table.players) if p.folded}
-        self.action_history = action_history
-        self.street = _PHASE_TO_STREET.get(phase, 0)
+        self.to_move         = acting_seat
+        self.n_players       = table.num_players
+        self.hands           = hand_buckets
+        self.wallet          = table.wallet
+        self.pot             = table.pot
+        self.current_bet     = table.current_bet
+        self.stacks          = [p.cash for p in table.players]
+        self.bets            = [p.bet for p in table.players]
+        self.n_raises        = n_raises
+        self.folded          = {i for i, p in enumerate(table.players) if p.folded}
+        self.street          = _PHASE_TO_STREET.get(phase, 0)
         self.community_cards = list(table.community_cards)
+        self.hole_cards      = [p.hand for p in table.players]
+        self.buyin           = table.buy_in
+        self.last_raise_size = table.last_raise_size
+
+        # Normalise action_history to (seat, action_str) tuples regardless of
+        # what the call site passes. Handles three formats:
+        #   plain strings:  "RAISE_2"          → (acting_seat, "RAISE_2")
+        #   2-tuples:       (seat, "RAISE_2")  → unchanged
+        #   3-tuples:       (seat, "RAISE_2", amount) → (seat, "RAISE_2")
+        normalised = []
+        for entry in action_history:
+            if isinstance(entry, str):
+                normalised.append((acting_seat, entry))
+            else:
+                normalised.append((entry[0], entry[1]))
+        self.action_history = normalised
 
 # ── Hybrid Bot ─────────────────────────────────────────────────────────────────
 class HybridPokerBot:
@@ -87,13 +104,14 @@ class HybridPokerBot:
         self._hand_buckets = [7] * table.num_players
 
         #per action tracking
-        self.actions_probs = []
+        self.actions_probs = {}
         
     def reset_hand(self, phase: GamePhase = GamePhase.PREFLOP):
         """Call at hand start after hole cards dealt"""
         self._current_street = phase
         self._n_raises = 0
         self._action_history = []
+        self.actions_probs = {}
         self.table.last_raise_size = self.table.buy_in
         
         for i, player in enumerate(self.table.players):
@@ -118,136 +136,123 @@ class HybridPokerBot:
     # ── Core decision logic ────────────────────────────────────────────────────
     
     def decide(self) -> tuple[str, PlayerAction]:
-        """Main decision point: assess hand, choose action, size bet"""
-        player = self.table.players[self.player_index]
-        bucket = self._hand_buckets[self.player_index]
-        
-        # Get neural assessment
-        ev = self._get_neural_ev()
 
-        # Compute pot odds and stack depth
-        pot = self.table.pot
+        """Sample directly from the CFR average strategy."""
+        player  = self.table.players[self.player_index]
         to_call = self.table.current_bet - player.bet
-        stack = player.cash
-        spr = stack / max(self.table.buy_in, 1)  # stack-to-pot ratio
-        
-        # Street-specific strategy
-        if self._current_street == GamePhase.PREFLOP:
-            return self._decide_preflop(bucket, ev, to_call, pot, stack, spr)
-        else:
-            return self._decide_postflop(bucket, ev, to_call, pot, stack, spr)
-    
-    def _get_neural_ev(self) -> float:
-        """Get value head estimate from neural net"""
+        stack   = player.cash
+
+        # Build legal action list
+        legal = ["CALL"]  # check
+        if to_call > 0:
+            legal.insert(0, "FOLD")
+        if self._n_raises < MAX_RAISES:
+            legal += ["RAISE_2", "RAISE_4"]
+        # ALLIN only postflop — preflop tree was trained without it
+        if stack > 0 and self._current_street != GamePhase.PREFLOP:
+            legal.append("ALLIN")
+
+        # Get average strategy from CFR net
+        policy = self._get_avg_policy(legal)
+
+        # Sample action from distribution
+        action_name = self._sample_action(policy, legal)
+
+        # Execute
+        return self._execute_action(action_name, player, to_call, stack)
+
+
+    def _get_avg_policy(self, legal_actions: list[str]) -> dict[str, float]:
+        """
+        Run the CFR net, mask illegal actions, softmax over legal actions only.
+        Returns avg strategy as a name->probability dict.
+        """
         proxy = EngineStateProxy(
-            table=self.table, phase=self._current_street,
-            acting_seat=self.player_index, n_raises=self._n_raises,
-            action_history=self._action_history, hand_buckets=self._hand_buckets
+            table=self.table,
+            phase=self._current_street,
+            acting_seat=self.player_index,
+            n_raises=self._n_raises,
+            action_history=self._action_history,
+            hand_buckets=self._hand_buckets,
         )
         features = encode_state(proxy).unsqueeze(0)
 
-        with torch.no_grad():
-            policy_logits, _ = self.net(features)     # (1, N_ACTIONS)
-            policy_logits    = policy_logits.squeeze(0)
-
-        masked = mask_logits(policy_logits, ['FOLD', 'CALL', 'RAISE_2', 'RAISE_4', 'ALL_IN'])
-        self.actions_probs = F.softmax(masked, dim=-1)
-
         self.net.eval()
         with torch.no_grad():
-            _, value = self.net(features)
-        return float(value.squeeze())
-    
-    # ── Preflop strategy ───────────────────────────────────────────────────────
-    
-    def _decide_preflop(self, bucket: int, ev: float, to_call: float, 
-                       pot: float, stack: float, spr: float) -> tuple[str, PlayerAction]:
-        """Preflop: hand-strength-dependent ranges"""
-        player = self.table.players[self.player_index]
-        
-        # Premium (0-1): always aggressive
-        if bucket <= 1:
-            if to_call == 0:
-                return self._make_raise(pot * 0.7, stack, "RAISE_2")  # open 3.5bb
-            elif spr < 15:
-                return self._make_allin(player, "ALLIN")  # shove short stacks
-            else:
-                return self._make_raise(to_call + pot * 0.8, stack, "RAISE_2")  # 3bet
-        
-        # Strong (2-3): value-oriented
-        elif bucket <= 3:
-            if to_call == 0:
-                if random.random() < 0.7 * self.aggression:
-                    return self._make_raise(pot * 0.6, stack, "RAISE_2")
-                return self._make_call(to_call, "CALL")
-            elif to_call < pot * 0.15:  # cheap to call
-                return self._make_call(to_call, "CALL")
-            elif ev > 0.3 and random.random() < 0.4 * self.aggression:
-                return self._make_raise(to_call + pot * 0.7, stack, "RAISE_2")
-            elif ev > 0.1:
-                return self._make_call(to_call, "CALL")
-            return self._make_fold("FOLD")
-        
-        # Medium (4-5): positional
-        elif bucket <= 5:
-            if to_call == 0:
-                if random.random() < 0.3 * self.aggression:
-                    return self._make_raise(pot * 0.5, stack, "RAISE_2")
-                return self._make_call(0, "CALL")  # check
-            elif to_call < pot * 0.1:
-                return self._make_call(to_call, "CALL")
-            elif ev > 0.2:
-                return self._make_call(to_call, "CALL")
-            return self._make_fold("FOLD")
-        
-        # Trash (6-7): tight
+            policy_logits, _ = self.net(features)   # (1, N_ACTIONS)
+        policy_logits = policy_logits.squeeze(0)    # (N_ACTIONS,)
+
+        masked = mask_logits(policy_logits, legal_actions)
+        probs  = F.softmax(masked, dim=-1)          # (N_ACTIONS,)
+
+        # Store for diagnostics / PHH logging
+        self.actions_probs = probs
+
+        return {
+            a: float(probs[i])
+            for i, a in enumerate(ALL_ACTIONS)
+        }
+
+
+    def _sample_action(self, policy: dict[str, float], legal_actions: list[str]) -> str:
+        """
+        Weighted random draw from the policy distribution.
+        Re-normalises over legal actions only in case of float drift.
+        """
+        names   = [a for a in ALL_ACTIONS if a in legal_actions]
+        weights = [policy.get(a, 0.0) for a in names]
+
+        total = sum(weights)
+        if total <= 0:
+            # Fallback: uniform — should never happen if mask is correct
+            weights = [1.0 / len(names)] * len(names)
         else:
-            if to_call == 0:
-                return self._make_call(0, "CALL")  # check
-            elif to_call < pot * 0.05 and ev > 0:
-                return self._make_call(to_call, "CALL")
+            weights = [w / total for w in weights]
+
+        r = random.random()
+        cumulative = 0.0
+        for name, w in zip(names, weights):
+            cumulative += w
+            if r <= cumulative:
+                return name
+        return names[-1]  # float rounding safety
+
+    def _execute_action(
+        self,
+        action_name: str,
+        player,
+        to_call: float,
+        stack: float,
+    ) -> tuple[str, PlayerAction]:
+        """
+        Translate sampled action name into a PlayerAction with pot-geometry sizing.
+        """
+        pot = self.table.pot
+
+        if action_name == "FOLD":
             return self._make_fold("FOLD")
-    
-    # ── Postflop strategy ──────────────────────────────────────────────────────
-    
-    def _decide_postflop(self, bucket: int, ev: float, to_call: float,
-                        pot: float, stack: float, spr: float) -> tuple[str, PlayerAction]:
-        """Postflop: EV-driven with pot geometry"""
-        player = self.table.players[self.player_index]
-        
-        # Facing a bet
-        if to_call > 0:
-            pot_odds = to_call / (pot + to_call)
-            
-            if ev > pot_odds + 0.2:  # strong hand, raise
-                if spr < 3:
-                    return self._make_allin(player, "ALLIN")
-                return self._make_raise(to_call + pot * 0.8, stack, "RAISE_2")
-            
-            elif ev > pot_odds:  # call
-                return self._make_call(to_call, "CALL")
-            
-            elif ev > pot_odds - 0.15 and random.random() < 0.3:  # bluff raise
-                return self._make_raise(to_call + pot * 1.2, stack, "RAISE_4")
-            
-            else:  # fold
-                return self._make_fold("FOLD")
-        
-        # First to act (no bet facing)
-        else:
-            if ev > 0.4:  # strong, bet for value
-                size = pot * (0.5 + ev * 0.3)  # 50-80% pot
-                return self._make_raise(size, stack, "RAISE_2")
-            
-            elif ev > 0.2 and random.random() < 0.5 * self.aggression:  # probe
-                return self._make_raise(pot * 0.4, stack, "RAISE_2")
-            
-            elif ev < -0.1 and random.random() < 0.2:  # bluff
-                return self._make_raise(pot * 0.6, stack, "RAISE_2")
-            
-            else:  # check
-                return self._make_call(0, "CALL")
-    
+
+        if action_name == "CALL":
+            return self._make_call(to_call, "CALL")
+
+        if action_name == "ALLIN":
+            return self._make_allin(player, "ALLIN")
+
+        if action_name in ("RAISE_2", "RAISE_4"):
+            multiplier = 2 if action_name == "RAISE_2" else 4
+            min_inc    = max(self.table.last_raise_size, self.table.buy_in)
+            raise_to   = self.table.current_bet + multiplier * min_inc
+            max_commit = player.bet + stack          # player's total stack
+            raise_to   = min(raise_to, max_commit)  # cap at stack
+            # If capped below engine minimum treat as all-in (engine allows short all-in)
+            min_legal  = self.table.current_bet + self.table.last_raise_size
+            if raise_to < min_legal:
+                return self._make_allin(player, action_name)
+            return self._make_raise(raise_to, stack, action_name)
+
+        # Unreachable under normal operation
+        return self._make_call(to_call, "CALL")
+
     # ── Action constructors ────────────────────────────────────────────────────
     
     def _make_fold(self, cfr_action: str) -> tuple[str, PlayerAction]:
@@ -270,15 +275,17 @@ class HybridPokerBot:
             raise_amount=0
         ))
     
-    def _make_raise(self, size: float, stack: float, cfr_action: str) -> tuple[str, PlayerAction]:
+    def _make_raise(self, raise_to: float, stack: float, cfr_action: str) -> tuple[str, PlayerAction]:
+        """
+        Emit a RAISE PlayerAction. raise_to is an absolute chip total already
+        validated by _execute_action (>= engine min, <= player stack).
+        """
         player = self.table.players[self.player_index]
-        min_raise = self.table.current_bet + max(self.table.last_raise_size, self.table.buy_in)
-        raise_to = max(int(size), min_raise)           # enforce minimum
-        raise_to = min(raise_to, int(player.bet + stack))  # cap at stack
+        raise_to = min(int(raise_to), int(player.bet + stack))  # integer chips, stack-capped
         return (cfr_action, PlayerAction(
             action_type=ActionType.RAISE,
             player_index=self.player_index,
-            raise_amount=raise_to
+            raise_amount=int(raise_to)
         ))
     
     def _make_allin(self, player, cfr_action: str) -> tuple[str, PlayerAction]:
@@ -291,6 +298,9 @@ class HybridPokerBot:
         ))
     
     def _print_action_probs(self):
+        if not hasattr(self.actions_probs, '__len__') or len(self.actions_probs) == 0:
+            print("Policy: (no decision yet)")
+            return
         print(f"Policy: ", end="")
         for a, p in zip(ALL_ACTIONS, self.actions_probs):
             print(f"{a}={p:.2f}", end="  ")

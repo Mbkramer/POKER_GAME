@@ -167,7 +167,7 @@ class VanillaCFR(CounterfactualRegretMinimizationBase):
         # sampling correction needed since we're tracking actual strategy not utility
         for a in actions:
             self.cumulative_sigma[inf_set][a] += (
-                cfr_reach * self.sigma[inf_set][a]
+                reaches[i] * self.sigma[inf_set][a]
             )
 
         # ─────────────────────────────────────────────────────────────────
@@ -938,10 +938,10 @@ def self_play_train(
         adaptive_epochs   = max(3, min(net_epochs, target_grad_steps // actual_batches))
 
         # Dynamic weight shifting based on previous iteration's val_loss
-        if val_loss < 0.15:
+        if val_loss < 0.10:
             policy_weight = 1.0
             value_weight  = 0.7
-        elif val_loss < 0.25:
+        elif val_loss < 0.15:
             policy_weight = 0.7
             value_weight  = 0.8
         else:

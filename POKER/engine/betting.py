@@ -4,7 +4,7 @@ from typing import List, Dict
 from core.player import Player
 from core.player_action import PlayerAction, ActionType
 from core.table_state import TableState
-from bots.cfr_bots.neural.state_encoder import get_profile
+from bots.cfr_bots.neural.combined_state_encoder import get_profile
 
 class BettingRound:
     """
@@ -29,7 +29,7 @@ class BettingRound:
 
         self.last_raiser_index: int | None = None
         self.active = True
-        self.pots = List[Dict]
+        self.pots = []
 
 
     def apply(self, action: PlayerAction) -> None:
@@ -169,7 +169,7 @@ class BettingRound:
             self._resolve_side_pots()
             return
         
-        self._resolve_side_pots
+        self._resolve_side_pots()
         self.active = True
 
     # =========================

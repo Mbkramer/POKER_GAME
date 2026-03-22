@@ -84,7 +84,7 @@ META (5)
   [75]     bias
 
 N_FEATURES = 76
-N_ACTIONS  = 5  [FOLD, CALL, RAISE_2, RAISE_4, ALLIN]
+N_ACTIONS  = 6  ["FOLD", "CHECK", "CALL", "RAISE_2", "RAISE_4", "ALLIN"]
 """
 
 from __future__ import annotations
@@ -92,12 +92,13 @@ import math
 import torch
 import numpy as np
 from collections import Counter, defaultdict
+from phevaluator import evaluate_cards   
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 N_FEATURES = 76
-N_ACTIONS  = 5
-ALL_ACTIONS = ["FOLD", "CALL", "RAISE_2", "RAISE_4", "ALLIN"]
+N_ACTIONS  = 6
+ALL_ACTIONS = ["FOLD", "CHECK", "CALL", "RAISE_2", "RAISE_4", "ALLIN"]
 
 N_SEATS    = 6
 N_BUCKETS  = 16        # must match N_PREFLOP_BUCKETS in preflop_abstraction.py
@@ -239,7 +240,8 @@ def reset_profiles():
 
 RANK_MAP = {
     '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,
-    '8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14
+    '8':8,'9':9,'T':10,'10':10,  
+    'J':11,'Q':12,'K':13,'A':14
 }
 
 def rank(card):
@@ -260,7 +262,6 @@ def _postflop_hand_strength(hole_cards, community_cards) -> float:
     if not community_cards or not hole_cards or len(hole_cards) < 2:
         return 0.0
     try:
-        from phevaluator import evaluate_cards
 
         _SUIT_MAP = {
             'SPADES': 's', 'HEARTS': 'h', 'DIAMONDS': 'd', 'CLUBS': 'c',
@@ -299,7 +300,7 @@ def _draw_features(hole_cards, community_cards):
 
         _RANK_VAL = {
             '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,
-            '9':9,'T':10,'J':11,'Q':12,'K':13,'A':14,
+            '9':9,'T':10,'10':10,'J':11,'Q':12,'K':13,'A':14,
         }
         ranks = sorted(set(
             _RANK_VAL.get(_get_rank_suit(c)[0], 0)
@@ -597,13 +598,13 @@ def encode_state(state, iteration_progress: float = 0.0) -> torch.Tensor:
 
     # ── [62-68] Hero HUD (gated on sufficient data) ───────────────────────────
     actor = get_profile(seat)
-    fv[62] = actor.vpip
-    fv[63] = actor.pfr
-    fv[64] = actor.three_bet_pct
-    fv[65] = actor.cbet_pct
-    fv[66] = actor.ats
-    fv[67] = actor.postflop_agg
-    fv[68] = actor.wtsd
+    fv[58] = actor.vpip
+    fv[59] = actor.pfr
+    fv[60] = actor.three_bet_pct
+    fv[61] = actor.cbet_pct
+    fv[62] = actor.ats
+    fv[63] = actor.postflop_agg
+    fv[64] = actor.wtsd
 
     # ── [69-74] Villain HUD (opp_seats/opp_profiles already built above) ────────
     if opp_profiles:

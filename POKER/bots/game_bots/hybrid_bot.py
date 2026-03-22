@@ -136,30 +136,29 @@ class HybridPokerBot:
     # ── Core decision logic ────────────────────────────────────────────────────
     
     def decide(self) -> tuple[str, PlayerAction]:
-
-        """Sample directly from the CFR average strategy."""
+        """Choose directly from the CFR average strategy."""
         player  = self.table.players[self.player_index]
         to_call = self.table.current_bet - player.bet
         stack   = player.cash
 
-        # Build legal action list
-        legal = ["CALL"]  # check
+        legal = []
         if to_call > 0:
-            legal.insert(0, "FOLD")
+            legal += ["FOLD", "CALL"]
+        else:
+            legal += ["CHECK"]
+
         if self._n_raises < MAX_RAISES:
             legal += ["RAISE_2", "RAISE_4"]
-        # ALLIN only postflop — preflop tree was trained without it
+
         if stack > 0 and self._current_street != GamePhase.PREFLOP:
             legal.append("ALLIN")
 
-        # Get average strategy from CFR net
         policy = self._get_avg_policy(legal)
-
-        # Sample action from distribution
         action_name = self._sample_action(policy, legal)
 
-        # Execute
-        return self._execute_action(action_name, player, to_call, stack)
+        chosen = self._execute_action(action_name, player, to_call, stack)
+        print(f"[BOT DEBUG] abstract={action_name} concrete={chosen[1].action_type} amount={chosen[1].raise_amount}")
+        return chosen
 
 
     def _get_avg_policy(self, legal_actions: list[str]) -> dict[str, float]:
@@ -195,27 +194,18 @@ class HybridPokerBot:
 
 
     def _sample_action(self, policy: dict[str, float], legal_actions: list[str]) -> str:
-        """
-        Weighted random draw from the policy distribution.
-        Re-normalises over legal actions only in case of float drift.
-        """
-        names   = [a for a in ALL_ACTIONS if a in legal_actions]
-        weights = [policy.get(a, 0.0) for a in names]
+        names = [a for a in ALL_ACTIONS if a in legal_actions]
+        ranked = sorted(names, key=lambda a: policy.get(a, 0.0), reverse=True)
 
-        total = sum(weights)
-        if total <= 0:
-            # Fallback: uniform — should never happen if mask is correct
-            weights = [1.0 / len(names)] * len(names)
-        else:
-            weights = [w / total for w in weights]
+        best = ranked[0]
+        if len(ranked) == 1:
+            return best
 
-        r = random.random()
-        cumulative = 0.0
-        for name, w in zip(names, weights):
-            cumulative += w
-            if r <= cumulative:
-                return name
-        return names[-1]  # float rounding safety
+        second = ranked[1]
+        if policy.get(best, 0.0) - policy.get(second, 0.0) >= 0.10:
+            return best
+
+        return best
 
     def _execute_action(
         self,
@@ -227,13 +217,14 @@ class HybridPokerBot:
         """
         Translate sampled action name into a PlayerAction with pot-geometry sizing.
         """
-        pot = self.table.pot
-
         if action_name == "FOLD":
             return self._make_fold("FOLD")
 
+        if action_name == "CHECK":
+            return self._make_check("CHECK")
+
         if action_name == "CALL":
-            return self._make_call(to_call, "CALL")
+            return self._make_call("CALL")
 
         if action_name == "ALLIN":
             return self._make_allin(player, "ALLIN")
@@ -242,16 +233,16 @@ class HybridPokerBot:
             multiplier = 2 if action_name == "RAISE_2" else 4
             min_inc    = max(self.table.last_raise_size, self.table.buy_in)
             raise_to   = self.table.current_bet + multiplier * min_inc
-            max_commit = player.bet + stack          # player's total stack
-            raise_to   = min(raise_to, max_commit)  # cap at stack
-            # If capped below engine minimum treat as all-in (engine allows short all-in)
+            max_commit = player.bet + stack
+            raise_to   = min(raise_to, max_commit)
+
             min_legal  = self.table.current_bet + self.table.last_raise_size
             if raise_to < min_legal:
                 return self._make_allin(player, action_name)
+
             return self._make_raise(raise_to, stack, action_name)
 
-        # Unreachable under normal operation
-        return self._make_call(to_call, "CALL")
+        return self._make_check("CHECK")
 
     # ── Action constructors ────────────────────────────────────────────────────
     
@@ -262,13 +253,14 @@ class HybridPokerBot:
             raise_amount=0
         ))
     
-    def _make_call(self, to_call: float, cfr_action: str) -> tuple[str, PlayerAction]:
-        if to_call <= 0:
-            return (cfr_action, PlayerAction(
-                action_type=ActionType.CHECK,
-                player_index=self.player_index,
-                raise_amount=0
-            ))
+    def _make_check(self, cfr_action: str) -> tuple[str, PlayerAction]:
+        return (cfr_action, PlayerAction(
+        action_type=ActionType.CHECK,
+        player_index=self.player_index,
+        raise_amount=0
+    ))
+
+    def _make_call(self, cfr_action: str) -> tuple[str, PlayerAction]:
         return (cfr_action, PlayerAction(
             action_type=ActionType.CALL,
             player_index=self.player_index,

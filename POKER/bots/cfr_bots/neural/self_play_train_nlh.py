@@ -63,8 +63,10 @@ from combined_state_encoder import (
 
 class VanillaCFR(CounterfactualRegretMinimizationBase):
     """
-    Outcome-sampling CFR with corrected regret update (Lanctot 2009).
+    External-sampling MCCFR.
 
+    Chance and opponent actions are sampled.
+    Traverser actions are fully expanded and regret-updated.
     """
 
     def __init__(self, root, sample_collector=None):
@@ -79,21 +81,10 @@ class VanillaCFR(CounterfactualRegretMinimizationBase):
         if raw >= 0:            return raw
         return 0
 
-    def _cfr_outcome_sampling(self, state, reaches, _depth=0):
-        if _depth > 200:
-            raise RecursionError("CFR outcome-sampling depth exceeded 200")
-        if state.is_terminal():
-            return state.evaluation()
+    # External Sampling Helper: ensure sigma entries exist for all actions at this infoset, then normalize.
+    def _normalize_sigma_for_actions(self, inf_set, actions):
+        self._ensure_info_set(inf_set, actions)
 
-        if state.is_chance():
-            child = state.sample_one()
-            return self._cfr_outcome_sampling(child, reaches, _depth + 1)
-
-        inf_set = state.inf_set()
-        self._ensure_info_set(inf_set, state.actions)
-        actions = state.actions
-
-        # Ensure all current actions have entries (handles dynamic action sets)
         for a in actions:
             if a not in self.sigma[inf_set]:
                 self.sigma[inf_set][a]              = 1.0 / len(actions)
@@ -101,92 +92,106 @@ class VanillaCFR(CounterfactualRegretMinimizationBase):
                 self.cumulative_sigma[inf_set][a]   = 0.0
                 self.nash_equilibrium[inf_set][a]   = 1.0 / len(actions)
 
-        # Normalize sigma (safety guard against floating drift)
         total_sigma = sum(self.sigma[inf_set][a] for a in actions)
-        if total_sigma > 0:
+        if total_sigma <= 0:
+            u = 1.0 / len(actions)
+            for a in actions:
+                self.sigma[inf_set][a] = u
+        else:
             for a in actions:
                 self.sigma[inf_set][a] /= total_sigma
 
-        i = self._player_index(state)
-
-        # Epsilon-greedy exploration: mix sigma with uniform to ensure all
-        # actions get visited, preventing regrets from stagnating on unsampled actions.
-        # Epsilon decays over iterations via self._epsilon (set in run()).
-        epsilon = getattr(self, '_epsilon', 0.05)
-        n       = len(actions)
-        explore_probs = [
-            (1 - epsilon) * self.sigma[inf_set][a] + epsilon / n
-            for a in actions
-        ]
-
-        # Sample one action proportional to explore_probs
-        r              = random.random()
-        cum            = 0.0
-        sampled_action = actions[-1]
-        for idx, a in enumerate(actions):
-            cum += explore_probs[idx]
+    # External Sampling Helper: sample an action according to sigma at this infoset, restricted to given actions.
+    def _sample_action_from_sigma(self, inf_set, actions):
+        probs = [self.sigma[inf_set][a] for a in actions]
+        r = random.random()
+        cum = 0.0
+        for a, p in zip(actions, probs):
+            cum += p
             if r <= cum:
-                sampled_action = a
-                break
+                return a
+        return actions[-1]
+    
+    # External-sampling MCCFR recursive traversal.
+    def _cfr_external_sampling(self, state, traverser, reaches, _depth=0):
+        if _depth > 200:
+            raise RecursionError("CFR external-sampling depth exceeded 200")
 
-        # Sampling probability under exploration policy (used for importance weighting)
-        q = explore_probs[actions.index(sampled_action)]
+        if state.is_terminal():
+            return state.evaluation()[traverser]
 
-        new_reaches    = list(reaches)
-        new_reaches[i] *= q
-        payoff = self._cfr_outcome_sampling(
-            state.play(sampled_action), new_reaches, _depth + 1
-        )
+        if state.is_chance():
+            child = state.sample_one()
+            return self._cfr_external_sampling(child, traverser, reaches, _depth + 1)
 
-        # More general version for n players:
-        cfr_reach = 1.0
+        inf_set = state.inf_set()
+        actions = state.actions
+        self._normalize_sigma_for_actions(inf_set, actions)
+
+        player = self._player_index(state)
+
+        opp_reach = 1.0
         for j, rr in enumerate(reaches):
-            if j != i:
-                cfr_reach *= rr
-        cfr_reach = max(cfr_reach, 1e-10)
+            if j != traverser:
+                opp_reach *= rr
+        opp_reach = max(opp_reach, 1e-12)
 
-        util_i = payoff[i]
+        if player == traverser:
+            action_utils = {}
+            node_util = 0.0
 
-        # W is the importance-weighted utility estimates
-        W = util_i / max(q, 1e-10)
-        W = max(min(W, self.root.wallet * 2), -self.root.wallet * 2)
+            for a in actions:
+                child = state.play(a)
+                child_reaches = list(reaches)
 
-        # Centered + CFR+
-        for a in actions:
-            if a == sampled_action:
-                regret = W * (1.0 - self.sigma[inf_set][a])
-            else:
-                regret = -W * self.sigma[inf_set][a]
-            self.cumulative_regrets[inf_set][a] = max(
-                0.0,
-                self.cumulative_regrets[inf_set][a] + cfr_reach * regret
-            )
+                u = self._cfr_external_sampling(
+                    child,
+                    traverser,
+                    child_reaches,
+                    _depth + 1,
+                )
 
-        # Average strategy accumulation — all actions weighted by reach probability
-        # Correct OS-CFR: accumulate sigma[a] * reach for all actions, no importance
-        # sampling correction needed since we're tracking actual strategy not utility
-        for a in actions:
-            self.cumulative_sigma[inf_set][a] += (
-                reaches[i] * self.sigma[inf_set][a]
-            )
+                action_utils[a] = u
+                node_util += self.sigma[inf_set][a] * u
 
-        # ─────────────────────────────────────────────────────────────────
+            for a in actions:
+                regret = action_utils[a] - node_util
+                self.cumulative_regrets[inf_set][a] = max(
+                    0.0,
+                    self.cumulative_regrets[inf_set][a] + opp_reach * regret
+                )
 
-        if self.sample_collector is not None:
-            self.sample_collector(state, self.sigma[inf_set], util_i, sampled_action)
+            for a in actions:
+                self.cumulative_sigma[inf_set][a] += opp_reach * self.sigma[inf_set][a]
 
-        return payoff
+            if self.sample_collector is not None:
+                self.sample_collector(state, self.sigma[inf_set], node_util)
+
+            return node_util
+
+        sampled_action = self._sample_action_from_sigma(inf_set, actions)
+        child_reaches = list(reaches)
+        child_reaches[player] *= self.sigma[inf_set][sampled_action]
+
+        return self._cfr_external_sampling(
+            state.play(sampled_action),
+            traverser,
+            child_reaches,
+            _depth + 1,
+        )
 
     def run(self, iterations=1, progress_interval=0):
         n = self.root.n_players
-
-        epsilon_start         = 0.3
-        epsilon_end           = 0.05
-        sigma_update_interval = 50
+        sigma_update_interval = 10  
 
         for i in range(iterations):
-            self._epsilon = epsilon_start - (epsilon_start - epsilon_end) * (i / max(iterations - 1, 1))
-            self._cfr_outcome_sampling(self.root, [1.0] * n)
+            for traverser in range(n):
+                self._cfr_external_sampling(
+                    self.root,
+                    traverser=traverser,
+                    reaches=[1.0] * n,
+                    _depth=0,
+                )
 
             if (i + 1) % sigma_update_interval == 0:
                 for inf_set in self.cumulative_regrets:
@@ -195,10 +200,12 @@ class VanillaCFR(CounterfactualRegretMinimizationBase):
             if progress_interval and (i + 1) % progress_interval == 0:
                 pct = (i + 1) / iterations
                 bar = int(pct * 20)
-                print(f"\r    CFR [{'X' * bar}{'.' * (20 - bar)}] {i+1}/{iterations}",
-                    end="", flush=True)
+                print(
+                    f"\r    CFR [{'X' * bar}{'.' * (20 - bar)}] {i+1}/{iterations}",
+                    end="",
+                    flush=True,
+                )
 
-        # Final sigma update
         for inf_set in self.cumulative_regrets:
             self._update_sigma(inf_set)
 
@@ -264,11 +271,9 @@ class NLHDatasetCollector(CFRDatasetCollector):
             'legal_actions': set(),
             'sigmas': [],
             'values': [],
-            'action_counts': {},
-            'action_value_sums': {},
         })
-
-    def __call__(self, state, sigma, value, sampled_action=None):
+        
+    def __call__(self, state, sigma, value):
         inf_set  = state.inf_set()
         features = self.encode_state(state)
 
@@ -286,10 +291,6 @@ class NLHDatasetCollector(CFRDatasetCollector):
         data['legal_actions'].update(state.actions)
         data['sigmas'].append(target_sigma)
         data['values'].append(float(value))
-
-        if sampled_action is not None:
-            data['action_counts'][sampled_action] = data['action_counts'].get(sampled_action, 0) + 1
-            data['action_value_sums'][sampled_action] = data['action_value_sums'].get(sampled_action, 0.0) + float(value)
 
     def get_dataset(self):
         """
@@ -402,10 +403,10 @@ def train_net_on_samples(net, optimizer, samples, device, epochs=10,
     street_counts = Counter(street_ids)
 
     target_mix = {
-        0: 0.15,  # PRE
-        1: 0.40,  # FLP
-        2: 0.27,  # TRN
-        3: 0.18,  # RVR
+        0: 0.30,  # PRE  ← change from 0.15
+        1: 0.30,  # FLP  ← change from 0.40
+        2: 0.20,  # TRN  ← change from 0.27
+        3: 0.20,  # RVR  ← change from 0.18
     }
 
     sample_weights = torch.tensor(
@@ -785,7 +786,7 @@ def self_play_train(
         cfr.sample_collector = None
 
         cfr.compute_nash_equilibrium()
-        game_value = cfr.value_of_the_game(n_samples=500)
+        game_value = cfr.value_of_the_game(n_samples=250)
 
         entropies = []
         for inf_set, actions in cfr.nash_equilibrium.items():
@@ -870,10 +871,10 @@ def self_play_train(
         # Target mix is deliberate, not frequency-matching.
         # ------------------------------------------------------------------
         street_targets = {
-            0: 0.15,  # PRE
-            1: 0.40,  # FLP
-            2: 0.27,  # TRN
-            3: 0.18,  # RVR
+            0: 0.30,  # PRE
+            1: 0.30,  # FLP
+            2: 0.20,  # TRN
+            3: 0.20,  # RVR
         }
 
         street_quotas = {
@@ -938,10 +939,10 @@ def self_play_train(
         adaptive_epochs   = max(3, min(net_epochs, target_grad_steps // actual_batches))
 
         # Dynamic weight shifting based on previous iteration's val_loss
-        if val_loss < 0.10:
+        if val_loss < 0.15:
             policy_weight = 1.0
             value_weight  = 0.7
-        elif val_loss < 0.15:
+        elif val_loss < 0.20:
             policy_weight = 0.7
             value_weight  = 0.8
         else:

@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-ALL_ACTIONS = ["FOLD", "CALL", "RAISE_2", "RAISE_4", "ALLIN"]
+ALL_ACTIONS = ["FOLD", "CHECK", "CALL", "RAISE_2", "RAISE_4", "ALLIN"]
 
 class ResidualBlock(nn.Module):
     def __init__(self, dim: int, dropout: float = 0.1):

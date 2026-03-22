@@ -43,7 +43,7 @@ class HandController:
         self.final_community_cards = []
         self.best_hand_name = ""
         self.best_five_card_combo = []
-        self.winners_pots: List[Dict]
+        self.winners_pots: List[Dict] = []
         self.muck = False
         self.no_showdown = False
 
@@ -56,7 +56,7 @@ class HandController:
     # =========================
 
     def init_bots(self, num_players):
-        from bots.game_bots.game_neural_bot import NeuralPokerBot, get_neural_bot
+        #from bots.game_bots.game_neural_bot import NeuralPokerBot, get_neural_bot
         from bots.game_bots.hybrid_bot import HybridPokerBot, get_hybrid_bot
         
         bot_net_path = FOUR_PLAYER
@@ -467,9 +467,10 @@ class HandController:
                     self.phase = GamePhase.GAMEOVER
                     self.game_over()
 
-        self._update_bots()
-        if self.phase not in (GamePhase.SHOWDOWN, GamePhase.GAMEOVER):
-            self._start_betting_round()
+        if self.phase != GamePhase.SHOWDOWN:
+            self._update_bots()
+            if self.phase not in (GamePhase.SHOWDOWN, GamePhase.GAMEOVER):
+                self._start_betting_round()
 
     def _run_monte_carlo_predictions(self):
 

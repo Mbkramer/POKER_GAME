@@ -22,12 +22,22 @@ from .constants import CHANCE
 # ── Action constants ──────────────────────────────────────────────────────────
 
 FOLD    = "FOLD"
+CHECK   = "CHECK"
 CALL    = "CALL"
 RAISE_2 = "RAISE_2"
 RAISE_4 = "RAISE_4"
 ALLIN   = "ALLIN"
 
-ALL_ACTIONS      = [FOLD, CALL, RAISE_2, RAISE_4, ALLIN]
+_ACTION_ABBR = {
+    FOLD: "F",
+    CHECK: "X",
+    CALL: "C",
+    RAISE_2: "R2",
+    RAISE_4: "R4",
+    ALLIN: "AI",
+}
+
+ALL_ACTIONS      = [FOLD, CHECK, CALL, RAISE_2, RAISE_4, ALLIN]
 SEAT_NAMES       = {0:"UTG", 1:"UTG1", 2:"HJ", 3:"CO", 4:"BTN", 5:"SB", 6:"BB"}
 STREET_NAMES     = {0:"PRE", 1:"FLP", 2:"TRN", 3:"RVR"}
 CARDS_PER_STREET = {0: 3, 1: 1, 2: 1}   # cards dealt on transition
@@ -525,14 +535,15 @@ class NLHGameState:
         owed  = max(self.current_bet - self.bets[seat], 0.0)
         acts  = []
 
-        # Fold only if facing a bet
+        # Facing a bet: fold/call are meaningful
         if owed > 0:
             acts.append(FOLD)
+            acts.append(CALL)
+        else:
+            # Unopened / checked-to node
+            acts.append(CHECK)
 
-        # Call / check
-        acts.append(CALL)
-
-        # Raise logic
+        # Raise / bet logic
         max_raises = self.MAX_RAISES
         can_raise = self.n_raises < max_raises and stack > owed
 
@@ -550,8 +561,7 @@ class NLHGameState:
             if self.n_raises > 0 and r4_to <= max_raise_to:
                 acts.append(RAISE_4)
 
-        # All-in always possible if player has chips
-        # Not pre flop 'PRE' = 0
+        # All-in availability
         if stack > 0:
             allow_allin = False
             if self.street == 0:
@@ -559,13 +569,13 @@ class NLHGameState:
                 commit_frac = self.bets[seat] / max(self.wallet, 1.0)
                 big_action = owed >= 2.5 * self.buyin
 
-                # Preflop jam only when clearly justified
                 if eff_bb <= 10:
                     allow_allin = True
                 elif big_action and commit_frac >= 0.25:
                     allow_allin = True
             else:
                 allow_allin = True
+
             if allow_allin:
                 acts.append(ALLIN)
 
@@ -616,6 +626,10 @@ class NLHGameState:
 
         if action == FOLD:
             folded.add(seat)
+
+        elif action == CHECK:
+            # Explicit no-op pass action when not facing a bet
+            pass
 
         elif action == CALL:
             owed = max(cb - bets[seat], 0.0)
@@ -881,7 +895,7 @@ class NLHGameState:
         hb     = self.hands[seat] if seat is not None else "X"
         street = STREET_NAMES.get(self.street, str(self.street))
         bb     = _board_bucket(self.community_cards)
-        hist   = "_".join(f"{s}{a[0]}" for s, a in self.action_history)
+        hist = "_".join(f"{s}{_ACTION_ABBR[a]}" for s, a in self.action_history)
 
         if self.street == 0 and seat is not None:
             pf_ctx    = _preflop_action_context(self)
